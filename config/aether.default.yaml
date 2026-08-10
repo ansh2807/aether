@@ -1,0 +1,322 @@
+# AETHER default configuration
+# Copy to ~/.aether/config.yaml or set AETHER_CONFIG
+
+data_dir: ./data
+workspace_root: ./workspace
+database_url: sqlite+aiosqlite:///./data/aether.db
+
+server:
+  host: 127.0.0.1
+  port: 7420
+  # No wildcard here: "*" plus credentials lets any browser page drive the API.
+  cors_origins:
+    - http://localhost:5173
+    - http://127.0.0.1:5173
+  # The API runs agents and stores provider keys; it is token-gated by default.
+  # Token is generated into data/api_token and printed by `aether serve`.
+  require_auth: true
+  api_token: ""    # leave empty to use data/api_token or $AETHER_API_TOKEN
+
+orchestrator:
+  max_agent_retries: 3
+  max_verification_loops: 3
+  default_approval_level: safe  # auto | safe | approval
+  default_mode: solo            # solo | collab | debate | parallel
+  agent_timeout_seconds: 600
+  network_retries: 2
+  debate_max_rounds: 3
+  debate_max_agents: 4
+  max_concurrent_subtasks: 4
+  enable_git_checkpoints: true
+  enable_agent_branches: true
+  approval_timeout_seconds: 0   # 0 = non-blocking approval queue
+  require_approval_on_start: false
+  # LLM router / chat terminal
+  context_compaction_ratio: 0.78
+  prefer_llm_session_summary: true
+  chat_max_failovers: 4
+  default_chat_provider: null
+
+budget:
+  default_max_tokens: 500000
+  default_max_requests: 200
+  default_max_cost_usd: null
+  usd_per_1k_tokens: 0.002
+
+circuit_breaker:
+  failure_threshold: 5
+  recovery_timeout_seconds: 60
+  half_open_max_calls: 1
+
+quota:
+  default_requests_per_minute: 30
+  default_daily_requests: 1000
+
+security:
+  approval_level: safe
+  secret_patterns:
+    - "(?i)api[_-]?key\\s*[:=]\\s*['\"]?([\\w-]{16,})"
+    - "(?i)authorization\\s*:\\s*bearer\\s+([\\w.-]+)"
+    - "(?i)password\\s*[:=]\\s*['\"]?([^\\s'\"]+)"
+    - "sk-[a-zA-Z0-9]{20,}"
+  command_denylist:
+    - "rm -rf /"
+    - "format "
+    - "mkfs"
+    - "shutdown"
+    - "reboot"
+    - ":(){ :|:& };:"
+  command_allowlist_prefixes:
+    - "git "
+    - "python "
+    - "python3 "
+    - "pip "
+    - "npm "
+    - "npx "
+    - "node "
+    - "pytest "
+    - "ruff "
+    - "mypy "
+    - "cargo "
+    - "go "
+    - "ls "
+    - "dir "
+    - "cat "
+    - "type "
+    - "echo "
+    - "mkdir "
+    - "cd "
+    - "pwd "
+    - "which "
+    - "where "
+  max_subprocess_output_bytes: 2000000
+  workspace_only: true
+
+logging:
+  level: INFO
+  json_logs: true
+
+# Capability scores are CONFIGURABLE defaults — not claims about real providers.
+# Tune per your experience and subscription.
+providers:
+  mock:
+    display_name: Mock Agent
+    adapter: mock
+    enabled: true
+    for_testing: true
+    context_window: 32000
+    capabilities:
+      coding: 8
+      reasoning: 8
+      research: 7
+      testing: 8
+      terminal: 8
+      review: 7
+      architecture: 7
+    roles_preferred: [architect, implementer, tester, reviewer, debugger]
+    limits:
+      requests_per_minute: 120
+      daily_requests: 10000
+
+  openai:
+    display_name: OpenAI
+    adapter: api
+    enabled: false
+    base_url: https://api.openai.com/v1
+    model: gpt-4o
+    api_key_env: OPENAI_API_KEY
+    context_window: 128000
+    capabilities:
+      coding: 9
+      reasoning: 9
+      research: 8
+      testing: 8
+      terminal: 5
+      review: 8
+      architecture: 8
+    roles_preferred: [architect, reviewer, implementer]
+    limits:
+      requests_per_minute: 60
+      daily_requests: 5000
+
+  openai_compatible:
+    display_name: OpenAI-Compatible
+    adapter: api
+    enabled: false
+    base_url: http://127.0.0.1:11434/v1
+    model: llama3
+    api_key_env: OPENAI_API_KEY
+    capabilities:
+      coding: 7
+      reasoning: 7
+      research: 6
+      testing: 6
+      terminal: 4
+      review: 6
+      architecture: 6
+    roles_preferred: [implementer, researcher]
+
+  claude_cli:
+    display_name: Claude (CLI)
+    adapter: cli
+    enabled: false
+    command: claude
+    args: []
+    context_window: 200000
+    # CLI adapters use already-authenticated CLIs on the machine.
+    # Status remains UNAVAILABLE until command is present and health_check passes.
+    capabilities:
+      coding: 9
+      reasoning: 9
+      research: 8
+      testing: 8
+      terminal: 9
+      review: 9
+      architecture: 9
+    roles_preferred: [architect, implementer, reviewer, debugger]
+    limits:
+      requests_per_minute: 20
+      daily_requests: 500
+
+  codex_cli:
+    display_name: Codex (CLI)
+    adapter: cli
+    enabled: false
+    command: codex
+    args: []
+    capabilities:
+      coding: 10
+      reasoning: 9
+      research: 7
+      testing: 10
+      terminal: 10
+      review: 8
+      architecture: 8
+    roles_preferred: [implementer, tester, debugger]
+    limits:
+      requests_per_minute: 20
+      daily_requests: 500
+
+  gemini:
+    display_name: Gemini
+    adapter: api
+    enabled: false
+    base_url: https://generativelanguage.googleapis.com/v1beta/openai
+    model: gemini-2.0-flash
+    api_key_env: GEMINI_API_KEY
+    context_window: 1000000
+    capabilities:
+      coding: 8
+      reasoning: 8
+      research: 9
+      testing: 7
+      terminal: 5
+      review: 7
+      architecture: 7
+    roles_preferred: [researcher, tester, implementer]
+    status_note: "ADAPTER_REQUIRED if OpenAI-compatible endpoint unavailable"
+
+  grok:
+    display_name: Grok
+    adapter: api
+    enabled: false
+    base_url: https://api.x.ai/v1
+    model: grok-2-latest
+    api_key_env: XAI_API_KEY
+    context_window: 128000
+    capabilities:
+      coding: 7
+      reasoning: 8
+      research: 9
+      testing: 6
+      terminal: 5
+      review: 7
+      architecture: 7
+    roles_preferred: [researcher, architect]
+
+  kimi:
+    display_name: Kimi (Moonshot)
+    adapter: api
+    enabled: false
+    base_url: https://api.moonshot.cn/v1
+    model: moonshot-v1-auto
+    api_key_env: KIMI_API_KEY
+    context_window: 128000
+    capabilities:
+      coding: 8
+      reasoning: 8
+      research: 8
+      testing: 7
+      terminal: 5
+      review: 7
+      architecture: 7
+    roles_preferred: [implementer, researcher, architect]
+    limits:
+      requests_per_minute: 30
+      daily_requests: 2000
+
+  opencode_cli:
+    display_name: Open Code
+    adapter: cli
+    enabled: false
+    command: opencode
+    model: opencode/claude-sonnet-4-5
+    context_window: 128000
+    capabilities:
+      coding: 9
+      reasoning: 8
+      research: 7
+      testing: 8
+      terminal: 9
+      review: 7
+      architecture: 7
+    roles_preferred: [implementer, architect, tester, debugger]
+    limits:
+      requests_per_minute: 30
+      daily_requests: 1000
+    status_note: "Multi-model hub — pick models at login (opencode models)"
+
+  hermes:
+    display_name: Hermes
+    adapter: unavailable
+    enabled: false
+    status_note: "UNAVAILABLE / ADAPTER_REQUIRED"
+    capabilities: {}
+
+  antigravity:
+    display_name: Antigravity
+    adapter: unavailable
+    enabled: false
+    status_note: "UNAVAILABLE / ADAPTER_REQUIRED"
+    capabilities: {}
+
+  generic_cli:
+    display_name: Generic CLI Agent
+    adapter: cli
+    enabled: false
+    command: ""
+    args: []
+    capabilities:
+      coding: 7
+      reasoning: 7
+      research: 7
+      testing: 7
+      terminal: 8
+      review: 6
+      architecture: 6
+    roles_preferred: [implementer]
+
+routing:
+  weights:
+    capability: 0.45
+    availability: 0.25
+    health: 0.15
+    cost: 0.05
+    latency: 0.05
+    failure_history: 0.05
+  prefer_different_agent_on_failover: true
+  user_preferences: []  # e.g. ["prefer:codex_cli", "avoid:mock"]
+  # The mock agent fabricates output and always reports COMPLETE. It is only
+  # routable while no real provider is enabled. Set true to allow it as a
+  # fallback anyway (not recommended — failures become invisible).
+  allow_testing_fallback: false

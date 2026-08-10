@@ -1,0 +1,344 @@
+"""OpenAI-compatible API adapter.
+
+Works with OpenAI, xAI (Grok), local OpenAI-compatible servers, and similar.
+Requires API key from environment variable named in config (never from task memory).
+"""
+
+from __future__ import annotations
+
+import os
+import time
+from typing import Any, AsyncIterator, Optional
+
+import httpx
+
+from aether.adapters.base import BaseAdapter
+from aether.domain.enums import FailureClass, ProviderAvailability
+from aether.domain.models import (
+    AuthStatus,
+    ExecutionRequest,
+    ExecutionResult,
+    HealthStatus,
+    ProviderConfig,
+    StreamChunk,
+    utcnow,
+)
+from aether.observability.logging import get_logger
+
+log = get_logger("aether.adapters.api")
+
+
+class ApiAgentAdapter(BaseAdapter):
+    def __init__(self, config: ProviderConfig, client: Optional[httpx.AsyncClient] = None) -> None:
+        super().__init__(config)
+        self._client = client
+        self._owns_client = client is None
+
+    def _api_key(self) -> Optional[str]:
+        env_name = self.config.api_key_env or "OPENAI_API_KEY"
+        return os.environ.get(env_name)
+
+    async def initialize(self) -> None:
+        if self._client is None:
+            self._client = httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=10.0))
+        self._initialized = True
+
+    async def shutdown(self) -> None:
+        if self._owns_client and self._client is not None:
+            await self._client.aclose()
+            self._client = None
+        await super().shutdown()
+
+    async def authenticate(self) -> AuthStatus:
+        key = self._api_key()
+        if not key:
+            return AuthStatus(
+                authenticated=False,
+                method="api_key_env",
+                message=f"Missing env {self.config.api_key_env or 'OPENAI_API_KEY'}",
+            )
+        return AuthStatus(authenticated=True, method="api_key_env", message="API key present in environment")
+
+    async def health_check(self) -> HealthStatus:
+        if not self.config.enabled:
+            return HealthStatus(
+                provider_id=self.provider_id,
+                available=False,
+                availability=ProviderAvailability.DISABLED,
+                message="disabled",
+                checked_at=utcnow(),
+            )
+        auth = await self.authenticate()
+        if not auth.authenticated:
+            return HealthStatus(
+                provider_id=self.provider_id,
+                available=False,
+                availability=ProviderAvailability.AUTH_REQUIRED,
+                message=auth.message,
+                checked_at=utcnow(),
+            )
+        if not self.config.base_url:
+            return HealthStatus(
+                provider_id=self.provider_id,
+                available=False,
+                availability=ProviderAvailability.ADAPTER_REQUIRED,
+                message="base_url not configured",
+                checked_at=utcnow(),
+            )
+        # Light check: models endpoint if available
+        assert self._client is not None or True
+        await self.initialize()
+        assert self._client is not None
+        url = self.config.base_url.rstrip("/") + "/models"
+        start = time.perf_counter()
+        try:
+            resp = await self._client.get(
+                url,
+                headers={"Authorization": f"Bearer {self._api_key()}"},
+            )
+            latency = (time.perf_counter() - start) * 1000
+            if resp.status_code in (401, 403):
+                return HealthStatus(
+                    provider_id=self.provider_id,
+                    available=False,
+                    availability=ProviderAvailability.AUTH_REQUIRED,
+                    latency_ms=latency,
+                    message=f"auth failed: HTTP {resp.status_code}",
+                    checked_at=utcnow(),
+                )
+            # 404 on /models is ok for some providers — still consider configured
+            return HealthStatus(
+                provider_id=self.provider_id,
+                available=True,
+                availability=ProviderAvailability.AVAILABLE,
+                latency_ms=latency,
+                message=f"reachable HTTP {resp.status_code}",
+                checked_at=utcnow(),
+            )
+        except Exception as exc:  # noqa: BLE001
+            return HealthStatus(
+                provider_id=self.provider_id,
+                available=False,
+                availability=ProviderAvailability.UNAVAILABLE,
+                message=str(exc),
+                checked_at=utcnow(),
+            )
+
+    async def execute(self, request: ExecutionRequest) -> ExecutionResult:
+        start = time.perf_counter()
+        await self.initialize()
+        assert self._client is not None
+        key = self._api_key()
+        if not key:
+            self._record_failure()
+            return ExecutionResult(
+                execution_id=request.execution_id,
+                provider_id=self.provider_id,
+                success=False,
+                error=f"Missing API key env {self.config.api_key_env}",
+                failure_class=FailureClass.AUTH,
+                latency_ms=(time.perf_counter() - start) * 1000,
+            )
+
+        url = self.config.base_url.rstrip("/") + "/chat/completions"
+        body: dict[str, Any] = {
+            "model": self.config.model or "gpt-4o",
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are an agent working under the AETHER orchestrator. "
+                        "Follow the assignment. When done, output a HANDOFF REPORT with "
+                        "STATUS, COMPLETED, REMAINING, FILES, TESTS, KNOWN_BUGS, "
+                        "ASSUMPTIONS, RECOMMENDED_NEXT_ACTION."
+                    ),
+                },
+                {"role": "user", "content": request.prompt},
+            ],
+            "temperature": float((self.config.extra or {}).get("temperature", 0.2)),
+        }
+
+        headers = {
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+        }
+        self._active[request.execution_id] = True
+        try:
+            resp = await self._client.post(url, json=body, headers=headers, timeout=request.timeout_seconds)
+        except httpx.TimeoutException:
+            self._record_failure()
+            self._active.pop(request.execution_id, None)
+            return ExecutionResult(
+                execution_id=request.execution_id,
+                provider_id=self.provider_id,
+                success=False,
+                error="API timeout",
+                failure_class=FailureClass.TIMEOUT,
+                latency_ms=(time.perf_counter() - start) * 1000,
+            )
+        except httpx.HTTPError as exc:
+            self._record_failure()
+            self._active.pop(request.execution_id, None)
+            return ExecutionResult(
+                execution_id=request.execution_id,
+                provider_id=self.provider_id,
+                success=False,
+                error=str(exc),
+                failure_class=FailureClass.NETWORK,
+                latency_ms=(time.perf_counter() - start) * 1000,
+            )
+        finally:
+            self._active.pop(request.execution_id, None)
+
+        text = resp.text
+        if resp.status_code == 429:
+            self._record_failure()
+            return ExecutionResult(
+                execution_id=request.execution_id,
+                provider_id=self.provider_id,
+                success=False,
+                error=text[:500],
+                failure_class=FailureClass.RATE_LIMIT,
+                latency_ms=(time.perf_counter() - start) * 1000,
+            )
+        if resp.status_code in (401, 403):
+            self._record_failure()
+            return ExecutionResult(
+                execution_id=request.execution_id,
+                provider_id=self.provider_id,
+                success=False,
+                error=text[:500],
+                failure_class=FailureClass.AUTH,
+                latency_ms=(time.perf_counter() - start) * 1000,
+            )
+        if resp.status_code >= 400:
+            self._record_failure()
+            return ExecutionResult(
+                execution_id=request.execution_id,
+                provider_id=self.provider_id,
+                success=False,
+                error=f"HTTP {resp.status_code}: {text[:500]}",
+                failure_class=self.classify_error(text),
+                latency_ms=(time.perf_counter() - start) * 1000,
+            )
+
+        try:
+            data = resp.json()
+            content = data["choices"][0]["message"]["content"]
+        except Exception as exc:  # noqa: BLE001
+            self._record_failure()
+            return ExecutionResult(
+                execution_id=request.execution_id,
+                provider_id=self.provider_id,
+                success=False,
+                error=f"Invalid API response: {exc}",
+                failure_class=FailureClass.INVALID_RESPONSE,
+                latency_ms=(time.perf_counter() - start) * 1000,
+                raw={"body": text[:2000]},
+            )
+
+        handoff = self.parse_handoff(
+            request.task_id, self.provider_id, content, requested=request.prompt[:300]
+        )
+        self._record_request(tokens=len(content) // 4)
+        return ExecutionResult(
+            execution_id=request.execution_id,
+            provider_id=self.provider_id,
+            success=True,
+            output=content,
+            handoff=handoff,
+            latency_ms=(time.perf_counter() - start) * 1000,
+            raw={"model": self.config.model},
+        )
+
+    async def stream(self, request: ExecutionRequest) -> AsyncIterator[StreamChunk]:
+        """Prefer OpenAI-compatible SSE stream; fall back to chunked execute."""
+        await self.initialize()
+        assert self._client is not None
+        key = self._api_key()
+        if not key or not self.config.base_url:
+            result = await self.execute(request)
+            if result.output:
+                yield StreamChunk(execution_id=request.execution_id, text=result.output, done=False)
+            yield StreamChunk(
+                execution_id=request.execution_id,
+                text="",
+                done=True,
+                metadata={"error": result.error or "", "success": result.success},
+            )
+            return
+
+        url = self.config.base_url.rstrip("/") + "/chat/completions"
+        body: dict[str, Any] = {
+            "model": self.config.model or "gpt-4o",
+            "stream": True,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are an agent under AETHER. Follow the assignment. "
+                        "For chat, answer helpfully and concisely."
+                    ),
+                },
+                {"role": "user", "content": request.prompt},
+            ],
+            "temperature": float((self.config.extra or {}).get("temperature", 0.2)),
+        }
+        headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+        try:
+            async with self._client.stream(
+                "POST",
+                url,
+                json=body,
+                headers=headers,
+                timeout=request.timeout_seconds,
+            ) as resp:
+                if resp.status_code >= 400:
+                    err = (await resp.aread()).decode("utf-8", errors="replace")[:500]
+                    yield StreamChunk(
+                        execution_id=request.execution_id,
+                        text="",
+                        done=True,
+                        metadata={"error": f"HTTP {resp.status_code}: {err}", "success": False},
+                    )
+                    return
+                async for line in resp.aiter_lines():
+                    if not line:
+                        continue
+                    if line.startswith("data: "):
+                        payload = line[6:].strip()
+                        if payload == "[DONE]":
+                            break
+                        try:
+                            import json as _json
+
+                            data = _json.loads(payload)
+                            delta = data["choices"][0].get("delta") or {}
+                            piece = delta.get("content") or ""
+                            if piece:
+                                yield StreamChunk(
+                                    execution_id=request.execution_id,
+                                    text=piece,
+                                    done=False,
+                                )
+                        except Exception:  # noqa: BLE001
+                            continue
+                yield StreamChunk(execution_id=request.execution_id, text="", done=True)
+                return
+        except Exception:
+            # fallback non-stream
+            result = await self.execute(request)
+            step = max(20, len(result.output or "") // 20)
+            text = result.output or ""
+            for i in range(0, len(text), step or 1):
+                yield StreamChunk(
+                    execution_id=request.execution_id,
+                    text=text[i : i + step],
+                    done=False,
+                )
+            yield StreamChunk(
+                execution_id=request.execution_id,
+                text="",
+                done=True,
+                metadata={"success": result.success, "error": result.error or ""},
+            )
