@@ -298,25 +298,27 @@ class Orchestrator:
         return task
 
     async def recover_running(self) -> list[str]:
-        """On orchestrator restart: requeue non-terminal tasks."""
+        """On orchestrator restart: requeue non-terminal tasks.
+
+        Collect every candidate *before* touching any of them. Requeuing moves a
+        task into QUEUED, so scanning-and-mutating in one pass finds the same
+        task again under a later status and re-saves it from a stale object —
+        stomping the status its freshly started runner has already advanced to.
+        """
+        candidates: dict[str, Task] = {}
+        for status in _RESUMABLE_STATUSES:
+            for task in await self.tasks.list(status=status, limit=500):
+                candidates.setdefault(task.task_id, task)
+
         resumed: list[str] = []
-        for status in (
-            TaskStatus.RUNNING,
-            TaskStatus.PLANNING,
-            TaskStatus.QUEUED,
-            TaskStatus.HANDOFF,
-            TaskStatus.TESTING,
-            TaskStatus.REVIEW,
-        ):
-            tasks = await self.tasks.list(status=status, limit=500)
-            for t in tasks:
-                t.status = TaskStatus.QUEUED
-                await self.tasks.save(t)
-                await self.start_task(t.task_id)
-                resumed.append(t.task_id)
-                await self.tasks.timeline(
-                    t.task_id, "orchestrator", "recovered", "Resumed after orchestrator restart"
-                )
+        for task_id, task in candidates.items():
+            task.status = TaskStatus.QUEUED
+            await self.tasks.save(task)
+            await self.start_task(task_id)
+            resumed.append(task_id)
+            await self.tasks.timeline(
+                task_id, "orchestrator", "recovered", "Resumed after orchestrator restart"
+            )
         return resumed
 
     async def _run_task(self, task_id: str) -> None:
