@@ -27,6 +27,28 @@ AETHER will ask you, in order:
 4. **Health check** each chosen model
 5. Then you type your task
 
+## You are at the prompt. Now what?
+
+```text
+>  (mock)
+```
+
+| Type this | What happens |
+|-----------|--------------|
+| `/` | a menu of every command appears and filters as you type |
+| `/help` | the full help centre, grouped |
+| anything else | a chat message to the active model |
+| `/task Build a CLI that renames photos` | full orchestration: plan, agents, verify |
+| `/setup` | connect real models (see below) |
+| `/quit` | save and exit |
+
+`(mock)` in the prompt is the **active model**. The mock agent is a built-in
+stand-in that invents plausible answers so you can try AETHER without any
+accounts — its replies are not from a real model. Run `/setup` or
+`/connect claude_cli` to use a real one.
+
+---
+
 Also anytime:
 
 ```powershell

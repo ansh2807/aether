@@ -10,7 +10,7 @@ verification. Models are pluggable adapters — not the thing in charge.
 [![CI](https://github.com/ansh2807/aether/actions/workflows/ci.yml/badge.svg)](https://github.com/ansh2807/aether/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache--2.0-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-99-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-116-brightgreen.svg)](tests/)
 
 </div>
 
@@ -252,7 +252,17 @@ aether checkpoint list TASK-...
 aether serve
 ```
 
-Modes (interactive prefixes): `/collab`, `/debate`, `/parallel`
+### The interactive terminal
+
+Press **`/`** and a filtered command menu appears as you type, with a
+description for each — the same feel as Claude Code. `/help` prints the whole
+help centre, grouped by category. A mistyped command suggests the closest match.
+
+Plain text is just a chat message. `/task <goal>` hands the goal to the full
+orchestrator; `/debate <topic>` runs several models against each other.
+
+On first run it tells you plainly that you are talking to the built-in mock
+agent and how to connect a real model.
 
 ### Extended capabilities
 

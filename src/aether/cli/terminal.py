@@ -21,17 +21,17 @@ from rich.text import Text
 
 from aether import __version__
 from aether.app import AetherApp
+from aether.cli.commands import CATEGORY_ORDER, COMMANDS, suggest
+from aether.cli.prompt import TerminalPrompt
 from aether.cli.ui import (
     ARROW,
     BANNER,
-    BULLET,
     DASH,
     DOT,
     ELLIPSIS,
     FAIL,
     GTE,
     OK,
-    PROMPT,
     console,
     data_table,
     health_text,
@@ -44,37 +44,69 @@ from aether.domain.enums import TaskMode
 from aether.domain.models import Task
 
 
-HELP_TEXT = """
-[bold cyan]AETHER = LLM router + agent terminal[/]
+def render_help():
+    """The help centre: every command, grouped, generated from the registry."""
+    from rich.console import Group
 
-[bold]Just type[/] - chat with the active model (auto-switch if limits hit;
-auto-summary + new session segment when context is full).
+    blocks = []
+    for category in CATEGORY_ORDER:
+        commands = [c for c in COMMANDS if c.category == category]
+        if not commands:
+            continue
+        table = data_table(
+            {"header": "Command", "no_wrap": True, "style": "cyan"},
+            {"header": "What it does", "no_wrap": True, "overflow": "ellipsis"},
+            title=category,
+        )
+        for cmd in commands:
+            table.add_row(cmd.display, cmd.summary)
+        blocks.append(table)
 
-[bold]Commands[/]
-  [cyan]/help[/]                 This help
-  [cyan]/status[/]               Models, session, context usage
-  [cyan]/agents[/]               Enabled providers
-  [cyan]/model[/] <id>           Switch active model now
-  [cyan]/models[/] [cyan]/setup[/]        Re-login / pick Claude / Google / Grok / Kimi / OpenCode
-  [cyan]/connect[/] <id>         Connect provider (OAuth / key)
-  [cyan]/new[/]                  New chat session (keeps providers)
-  [cyan]/sessions[/]             List chat sessions
-  [cyan]/resume[/] <id>          Resume a chat session
-  [cyan]/compact[/]              Force summarize + rollover now
-  [cyan]/debate[/] <topic>       Multi-model debate (models talk)
-  [cyan]/task[/] <goal>          Full orchestrator task (plan -> agents -> verify)
-  [cyan]/mode[/] chat|debate|task
-  [cyan]/tasks[/]                Orchestrator task list
-  [cyan]/inspect[/] <TASK-id>    Inspect orchestrator task
-  [cyan]/doctor[/]               Diagnostics
-  [cyan]/clear[/]                Clear screen
-  [cyan]/quit[/]                 Exit
+    examples = [c for c in COMMANDS if c.example]
+    tips = data_table(
+        {"header": "Try", "no_wrap": True, "style": "green"},
+        title="Examples",
+    )
+    for cmd in examples[:4]:
+        tips.add_row(cmd.example)
+    tips.add_row("What does this error mean? <paste it>   [dim](plain text = just chat)[/]")
+    blocks.append(tips)
 
-[bold]Examples[/]
-  Explain this error: ...
-  /debate Best architecture for a QR file transfer app
-  /task Build a small Python CLI tool
-"""
+    return Panel(
+        Group(*blocks),
+        title="AETHER help",
+        subtitle="[dim]type / to filter commands as you type[/]",
+        border_style="blue",
+        padding=(0, 1),
+    )
+
+
+def render_getting_started(active: str, has_real_provider: bool) -> Panel:
+    """First thing a new user reads. Tells them what to type, right now."""
+    lines = [
+        "[bold]Type a message[/] and the active model answers. That's it.",
+        "",
+        f"[bold cyan]/[/]        {DOT} lists every command as you type",
+        f"[bold cyan]/help[/]    {DOT} the full help centre",
+        f"[bold cyan]/task[/]    {DOT} hand a goal to the orchestrator (plan {ARROW} agents {ARROW} verify)",
+        f"[bold cyan]/quit[/]    {DOT} save and leave",
+    ]
+    if not has_real_provider:
+        lines += [
+            "",
+            f"[yellow]You are on the [bold]{active}[/bold] agent.[/] It is a built-in stand-in that makes",
+            "up plausible answers so you can try AETHER with no accounts. It is not a",
+            "real model, and its replies mean nothing.",
+            "",
+            f"  [bold cyan]/setup[/]            {DOT} pick and sign in to real models",
+            f"  [bold cyan]/connect claude_cli[/] {DOT} or connect just one",
+        ]
+    return Panel(
+        "\n".join(lines),
+        title="start here",
+        border_style="green" if has_real_provider else "yellow",
+        padding=(0, 2),
+    )
 
 
 def _enabled_line(app: AetherApp, profile: UserProfile) -> str:
@@ -238,24 +270,25 @@ async def run_terminal(
     console.clear()
     render_banner()
     console.print(render_header(app, profile, mode, session))
-    console.print(
-        Panel(
-            "[bold]You are in chat mode[/] (like Grok / Claude Code).\n"
-            f"{BULLET} One active model answers\n"
-            f"{BULLET} If it hits rate/quota/auth/context limits {ARROW} [green]auto-switch[/] to next model\n"
-            f"{BULLET} If context fills up {ARROW} [green]auto-summary[/] + new segment, continue where you left off\n"
-            f"{BULLET} [cyan]/debate topic[/] for multi-model discussion {DOT} [cyan]/task goal[/] for full orchestration",
-            border_style="green",
-            title="ready",
-        )
+    has_real = any(
+        cfg.enabled and not cfg.for_testing for cfg in app.registry.list_configs()
     )
+    console.print(
+        render_getting_started(session.active_provider or "mock", has_real)
+    )
+
+    prompt = TerminalPrompt()
+    if not prompt.menu_available:
+        console.print(
+            "[dim]Tip: type [/][cyan]/help[/][dim] to see every command.[/]"
+        )
 
     while True:
         console.print()
         try:
             console.print(Rule(style="dim"))
             active = session.active_provider or "?"
-            raw = console.input(f"[bold cyan]{PROMPT}[/] [dim]({active})[/] ").strip()
+            raw = prompt.ask(active).strip()
         except (EOFError, KeyboardInterrupt):
             console.print("\n[dim]Session saved. Bye.[/]")
             app.chat_store.save(session)
@@ -264,13 +297,18 @@ async def run_terminal(
         if not raw:
             continue
 
+        # a lone "/" means "show me what there is"
+        if raw == "/":
+            console.print(render_help())
+            continue
+
         if raw in {"/quit", "/exit", ":q", "quit", "exit"}:
             app.chat_store.save(session)
             console.print("[dim]Bye.[/]")
             break
 
-        if raw in {"/help", "help", "?"}:
-            console.print(Panel(HELP_TEXT, title="help", border_style="blue"))
+        if raw in {"/help", "/?", "help", "?"}:
+            console.print(render_help())
             continue
 
         if raw in {"/clear", "clear"}:
@@ -469,7 +507,17 @@ async def run_terminal(
             continue
 
         if raw.startswith("/"):
-            console.print(f"[yellow]Unknown command[/] {DASH} /help")
+            close = suggest(raw)
+            if close:
+                options = "  ".join(f"[cyan]{c.display}[/]" for c in close)
+                console.print(
+                    f"[yellow]No such command[/] [bold]{raw.split()[0]}[/]. Did you mean: {options}"
+                )
+            else:
+                console.print(
+                    f"[yellow]No such command[/] [bold]{raw.split()[0]}[/]. "
+                    f"Type [cyan]/[/] or [cyan]/help[/] to see them all."
+                )
             continue
 
         # --- default: CHAT with live token stream ---
