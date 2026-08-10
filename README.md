@@ -464,7 +464,8 @@ CI runs the suite on Linux and Windows against Python 3.11 and 3.12, plus the
 dashboard typecheck and build. See [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 
 Changes worth knowing about are in [`CHANGELOG.md`](CHANGELOG.md), including the
-open issues that are known and not yet fixed.
+open issues that are known and not yet fixed. Where the project is going next,
+and why, is in [`docs/IMPROVEMENT_PLAN.md`](docs/IMPROVEMENT_PLAN.md).
 
 ---
 
