@@ -41,6 +41,7 @@ from aether.domain.models import (
     Task,
     TaskMemory,
 )
+from aether.execution_log import ExecutionLog
 from aether.observability.logging import get_logger
 from aether.storage.repository import FileAuditLogger, SqliteRepository
 
@@ -578,6 +579,11 @@ class Orchestrator:
         if sub is None:
             return
 
+        # A previous runner may have been killed mid-execution. Whatever the
+        # agent had already produced is on disk — fold it in as a partial
+        # handoff so this attempt continues rather than starting from zero.
+        await self._salvage_interrupted_output(task, memory, sub)
+
         async def apply(mutate: Callable[[Task, Subtask], None]) -> None:
             """Persist a change to this subtask without clobbering siblings.
 
@@ -850,6 +856,10 @@ class Orchestrator:
                     )
                 handoff.to_agent = "orchestrator"
                 await self.handoffs.accept(handoff)
+                # the output is now durable inside the handoff; the raw capture
+                # would otherwise be salvaged a second time on the next attempt
+                if task.workspace_path:
+                    ExecutionLog(Path(task.workspace_path), sub.subtask_id).clear()
                 memory = await self.handoffs.apply_to_memory(memory, handoff)
                 self.metrics.record_task_event(task_id, "handoff", provider=provider_id)
 
@@ -973,6 +983,58 @@ class Orchestrator:
 
         await apply(_exhausted)
         await self.tasks.timeline(task_id, "orchestrator", "subtask_failed", f"{sub.title}: {last_error}")
+
+    async def _salvage_interrupted_output(
+        self, task: Task, memory: TaskMemory, sub: Subtask
+    ) -> bool:
+        """Fold a killed execution's partial output back into the task.
+
+        Adapters mirror agent output to disk as it arrives, so a process that
+        died mid-execution still left everything it had received. Turning that
+        into a handoff is the difference between resuming and starting over.
+        """
+        if not task.workspace_path:
+            return False
+        partial = ExecutionLog(Path(task.workspace_path), sub.subtask_id)
+        if not partial.exists():
+            return False
+
+        text = partial.read()
+        if not text.strip():
+            partial.clear()
+            return False
+
+        agent = sub.assigned_agent or "unknown-agent"
+        handoff = self.handoffs.synthesize(
+            task.task_id, agent, sub.description, output=text
+        )
+        handoff.assumptions = list(handoff.assumptions) + [
+            "Salvaged from an execution that was interrupted before it returned"
+        ]
+        await self.handoffs.accept(handoff)
+        await self.handoffs.apply_to_memory(memory, handoff)
+        await self.tasks.timeline(
+            task.task_id,
+            agent,
+            "salvaged",
+            f"{len(text)} chars recovered from an interrupted run of '{sub.title}'",
+        )
+        await self._emit(
+            {
+                "type": "output_salvaged",
+                "task_id": task.task_id,
+                "subtask": sub.title,
+                "characters": len(text),
+            }
+        )
+        partial.clear()
+        log.info(
+            "salvaged_partial_output",
+            task_id=task.task_id,
+            subtask=sub.subtask_id,
+            characters=len(text),
+        )
+        return True
 
     async def _failover_prep(
         self,

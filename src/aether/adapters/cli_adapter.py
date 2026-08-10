@@ -23,6 +23,8 @@ from aether.domain.models import (
     ProviderConfig,
     utcnow,
 )
+from aether.adapters.streaming import stream_process
+from aether.execution_log import ExecutionLog
 from aether.observability.logging import get_logger
 from aether.security.sandbox import ExecutionSandbox, SecurityError
 
@@ -185,9 +187,13 @@ class CliAgentAdapter(BaseAdapter):
             self._active[request.execution_id] = True
 
             stdin_data = prompt.encode("utf-8") if prompt_mode == "stdin" else None
+            # Read as the agent writes, mirroring stdout into the execution log.
+            # communicate() would buffer everything until exit, so a kill at
+            # minute nine of a ten-minute agent would lose all of it.
+            exec_log = ExecutionLog.for_request(request.workspace_path, request.subtask_id)
             try:
                 stdout_b, stderr_b = await asyncio.wait_for(
-                    proc.communicate(input=stdin_data),
+                    stream_process(proc, stdin_data, self.max_output_bytes, exec_log),
                     timeout=request.timeout_seconds,
                 )
             except asyncio.TimeoutError:

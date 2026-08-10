@@ -215,3 +215,123 @@ async def test_recovery_is_recorded_not_silent(tmp_path: Path):
     assert "recovered" in actions or "reclaimed" in actions, (
         f"recovery left no trace on the timeline: {sorted(actions)}"
     )
+
+
+# --- WO-02: in-flight output is captured and salvaged --------------------
+
+
+def test_execution_log_round_trip(tmp_path: Path):
+    from aether.execution_log import ExecutionLog
+
+    log = ExecutionLog(tmp_path / "ws", "sub-1")
+    assert not log.exists()
+    log.append("first ")
+    log.append("second")
+    assert log.exists()
+    assert log.read() == "first second"
+    log.clear()
+    assert not log.exists()
+    assert log.read() == ""
+
+
+def test_execution_log_skipped_without_a_subtask(tmp_path: Path):
+    """Chat turns are not resumable work and must not be logged as such."""
+    from aether.execution_log import ExecutionLog
+
+    assert ExecutionLog.for_request(str(tmp_path), None) is None
+    assert ExecutionLog.for_request("", "sub-1") is None
+    assert ExecutionLog.for_request(str(tmp_path), "sub-1") is not None
+
+
+@pytest.mark.asyncio
+async def test_cli_adapter_writes_output_as_it_arrives(tmp_path: Path):
+    """The whole point: output is on disk before the process finishes."""
+    import asyncio as aio
+
+    from aether.adapters.cli_adapter import CliAgentAdapter
+    from aether.domain.enums import AdapterType
+    from aether.domain.models import ExecutionRequest, ProviderConfig
+    from aether.execution_log import ExecutionLog
+
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    cfg = ProviderConfig(
+        provider_id="slow", display_name="Slow", adapter=AdapterType.CLI,
+        enabled=True, command=sys.executable,
+        args=["-u", "-c", "import time; print('EARLY OUTPUT', flush=True); time.sleep(30)"],
+        extra={"prompt_mode": "none"},
+    )
+    adapter = CliAgentAdapter(cfg)
+    request = ExecutionRequest(
+        task_id="T", subtask_id="sub-1", provider_id="slow",
+        prompt="hi", workspace_path=str(ws), timeout_seconds=30,
+    )
+
+    runner = aio.create_task(adapter.execute(request))
+    log = ExecutionLog(ws, "sub-1")
+    for _ in range(100):                      # wait for the early line to land
+        await aio.sleep(0.1)
+        if "EARLY OUTPUT" in log.read():
+            break
+    captured = log.read()
+
+    await adapter.cancel_all()                # kill it mid-run
+    runner.cancel()
+    try:
+        await runner
+    except (aio.CancelledError, Exception):
+        pass
+
+    assert "EARLY OUTPUT" in captured, (
+        "output was still buffered in memory when the process was killed"
+    )
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_salvages_an_interrupted_run(app):
+    """A partial log left by a dead runner becomes a handoff, not lost work."""
+    from aether.domain.enums import SubtaskStatus
+    from aether.domain.models import Subtask, Task
+    from aether.execution_log import ExecutionLog
+
+    task = await app.tasks.create_task("Build a module")
+    task.subtasks = [
+        Subtask(
+            task_id=task.task_id, title="Implement",
+            description="Implement the module", status=SubtaskStatus.READY,
+            assigned_agent="mock",
+        )
+    ]
+    await app.tasks.save(task)
+
+    # what a killed runner would have left behind
+    partial = ExecutionLog(Path(task.workspace_path), task.subtasks[0].subtask_id)
+    partial.append(
+        "STATUS: PARTIAL\nCOMPLETED:\n- wrote the parser\nREMAINING:\n- wire it up\n"
+    )
+
+    await app.orchestrator.start_task(task.task_id)
+    done = await wait_terminal_app(app, task.task_id)
+
+    assert done.status.value == "COMPLETED"
+    events = await app.repo.list_events(task.task_id)
+    assert any(e.action == "salvaged" for e in events), (
+        f"partial output was not salvaged: {[e.action for e in events]}"
+    )
+    handoffs = await app.repo.list_handoffs(task.task_id)
+    assert any("wrote the parser" in h.completed[0] for h in handoffs if h.completed), (
+        "the salvaged work never reached a handoff"
+    )
+    assert not partial.exists(), "the log was not cleared once accounted for"
+
+
+async def wait_terminal_app(app, task_id: str, timeout: float = 40.0):
+    import asyncio as aio
+
+    deadline = aio.get_event_loop().time() + timeout
+    while aio.get_event_loop().time() < deadline:
+        t = await app.tasks.get(task_id)
+        if t and t.status.value in {"COMPLETED", "FAILED", "CANCELLED", "PAUSED"}:
+            return t
+        await aio.sleep(0.1)
+    raise TimeoutError((await app.tasks.get(task_id)).status.value)
