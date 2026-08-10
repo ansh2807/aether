@@ -290,6 +290,8 @@ class ContextPackage(BaseModel):
     constraints: list[str] = Field(default_factory=list)
     subtask: Optional[Subtask] = None
     summary: str = ""
+    # set when the package was trimmed to fit the provider's context window
+    compacted: bool = False
 
     def to_prompt_block(self) -> str:
         lines = [

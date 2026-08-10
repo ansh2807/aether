@@ -13,6 +13,7 @@ from aether.core.budget import BudgetExceeded, BudgetManager
 from aether.core.checkpoint import CheckpointManager
 from aether.core.circuit import CircuitBreaker
 from aether.core.context import ContextManager
+from aether.core.context_budget import context_window_for
 from aether.core.event_bus import EventBus
 from aether.core.handoff import HandoffManager
 from aether.core.metrics import MetricsCollector
@@ -666,6 +667,14 @@ class Orchestrator:
                 raise
 
             latest_cp = await self.checkpoints.latest(task_id)
+            # Budget the package against the provider actually about to receive
+            # it: windows differ by an order of magnitude between providers, so
+            # "fits" is only meaningful per-provider.
+            provider_cfg = self.registry.get_config(provider_id)
+            window = context_window_for(
+                provider_id,
+                config_window=provider_cfg.context_window if provider_cfg else None,
+            )
             pkg = await self.context.build_package(
                 task,
                 memory,
@@ -673,7 +682,15 @@ class Orchestrator:
                 role=sub.role,
                 subtask=sub,
                 checkpoint_id=latest_cp.checkpoint_id if latest_cp else None,
+                context_window=window,
             )
+            if pkg.compacted:
+                await self.tasks.timeline(
+                    task_id,
+                    "orchestrator",
+                    "context_compacted",
+                    f"trimmed to fit {provider_id}'s {window}-token window",
+                )
             prompt = pkg.to_prompt_block() + "\n\n" + sub.description
 
             await self._msg(
