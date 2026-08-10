@@ -1,31 +1,115 @@
-# AETHER — Universal Multi-Agent AI Orchestrator
+<div align="center">
 
-**AETHER** is a production-oriented multi-agent **AI operating system / orchestrator**.  
-It is **not** a chatbot and **not** a free-form multi-agent chat room.
+# ⟁ AETHER
 
-A **deterministic central Orchestrator** owns:
+**A deterministic orchestrator for multi-agent AI work.**
 
-- task state & lifecycle  
-- agent selection & routing  
-- structured handoffs  
-- checkpoints & recovery  
-- failover across providers  
-- verification  
-- quotas, circuit breakers, audit  
+One control plane owns task state, routing, structured handoffs, failover and
+verification. Models are pluggable adapters — not the thing in charge.
 
-Providers (OpenAI, Claude CLI, Codex CLI, Gemini, Grok, …) plug in through a common **AgentAdapter** interface (API or CLI). Adding a provider should only require: adapter + capabilities + config + registration.
+[![CI](https://github.com/ansh2807/aether/actions/workflows/ci.yml/badge.svg)](https://github.com/ansh2807/aether/actions/workflows/ci.yml)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
+[![License: Apache 2.0](https://img.shields.io/badge/license-Apache--2.0-green.svg)](LICENSE)
+[![Tests](https://img.shields.io/badge/tests-99-brightgreen.svg)](tests/)
+
+</div>
 
 ---
 
-## Architecture (summary)
+`aether run "Build a small Python hello module"` — real output, default offline
+config (the bundled mock agent, so you can try the whole lifecycle with no keys):
 
-```
-USER → CLI / UI → ORCHESTRATOR → TASK MANAGER → AGENT ROUTER
-        → Adapters (API | CLI | Unavailable) → Shared workspace (git)
-        → Verification → Final result
+```text
+┌───────────────────── Task started ──────────────────────┐
+│  Build a small Python hello module                      │
+│  TASK-20260810-13004  ·  mode=solo                      │
+└─────────────────────────────────────────────────────────┘
+  · user task_created: Build a small Python hello module
+  · orchestrator planned: 3 subtasks: Plan approach, Implement, Verify
+  · orchestrator status: RUNNING
+  · orchestrator assigned: Plan approach → mock (role=architect)
+  · mock handoff: COMPLETE: completed=3 remaining=1
+  · orchestrator subtask_complete: Plan approach via mock
+  · orchestrator assigned: Implement → mock (role=implementer)
+  · orchestrator subtask_complete: Implement via mock
+  · orchestrator assigned: Verify → mock (role=tester)
+  · orchestrator subtask_complete: Verify via mock
+  · orchestrator status: TESTING
+  · verification PASSED: PASSED: 3 checks
+  · orchestrator status: COMPLETED
+
+✓ COMPLETED  TASK-20260810-13004  ·  100%  ·  agents: mock
 ```
 
-Full design: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
+Point it at real providers and the same lifecycle runs across them, with
+routing and failover between agents instead of one mock.
+
+## What it is
+
+AETHER is **not** a chatbot and **not** a free-form room where models talk to each
+other. A deterministic central Orchestrator owns:
+
+| | |
+|---|---|
+| **Task state & lifecycle** | one authoritative state machine, persisted to SQLite |
+| **Agent selection** | capability + health + quota scored routing, not a hard-coded switch |
+| **Structured handoffs** | formal reports, so the next agent resumes from a checkpoint rather than zero |
+| **Failover** | timeout, crash, auth, rate limit, quota, context overflow — all classified and routed around |
+| **Verification** | a mandatory gate before `COMPLETED`; "the agent said done" is not evidence |
+| **Guardrails** | per-task budgets, per-provider circuit breakers and quotas, an append-only audit log |
+
+Providers (OpenAI, Claude CLI, Codex CLI, Gemini, Grok, Open Code, …) plug in
+behind one `AgentAdapter` interface. Adding one is an adapter + capability
+scores + config — no orchestrator changes.
+
+### Design rules it actually holds to
+
+- **The orchestrator is authoritative.** Agents never own global state.
+- **No fake integrations.** A provider without a real adapter reports
+  `ADAPTER_REQUIRED` and refuses, rather than pretending. The bundled mock agent
+  is never routable while a real provider is enabled — a fabricated success must
+  never stand in for a real failure.
+- **Verification before trust.** Artifacts are checked; claims are not.
+- **Respect provider auth and terms.** CLI adapters drive already-authenticated
+  CLIs via subprocess. Nothing scrapes credentials or converts a subscription
+  into an API.
+
+## Architecture
+
+```mermaid
+flowchart TB
+    U["CLI · REST · WebSocket"] --> O
+
+    subgraph CP["Control plane — orchestrator owns all of this"]
+        direction TB
+        O["Orchestrator"] --> TM["Task manager<br/><i>lifecycle + persistence</i>"]
+        O --> WF["Workflow engine<br/><i>subtask DAG</i>"]
+        O --> R["Router<br/><i>capability · health · quota</i>"]
+        O --> V["Verification<br/><i>gate before COMPLETED</i>"]
+        O --> G["Budgets · circuit breakers<br/>approvals · audit"]
+    end
+
+    R --> A
+
+    subgraph A["Adapters — the only provider touchpoint"]
+        direction LR
+        CLI["CLI<br/><i>subprocess</i>"]
+        API["API<br/><i>OpenAI-compatible</i>"]
+        MOCK["Mock<br/><i>tests only</i>"]
+        NA["Unavailable<br/><i>ADAPTER_REQUIRED</i>"]
+    end
+
+    A --> WS["Shared workspace<br/><i>git branches per agent</i>"]
+    WS --> V
+    V -->|pass| DONE["Final result"]
+    V -->|fail| O
+
+    TM <--> DB[("SQLite<br/>tasks · memory · handoffs<br/>checkpoints · timeline")]
+```
+
+Full design: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) ·
+Failure matrix: [`docs/FAILURE_SCENARIOS.md`](docs/FAILURE_SCENARIOS.md) ·
+Handoff contract: [`docs/HANDOFF_PROTOCOL.md`](docs/HANDOFF_PROTOCOL.md)
 
 ---
 
@@ -328,17 +412,21 @@ Includes unit tests, end-to-end mock orchestration, failover, verification, canc
 
 ```text
 aether/
-  docs/                 Architecture & protocols
+  docs/                 Architecture, protocols, failure matrix
   config/               Default YAML
   src/aether/
-    adapters/           CLI, API, mock, unavailable, registry
-    core/               Orchestrator, router, handoff, verify, …
+    adapters/           CLI, API, mock, unavailable, registry, plugins
+    core/               Orchestrator, router, workflow, handoff, verify,
+                        checkpoints, budgets, quotas, circuit breaker,
+                        approvals, metrics, chat sessions, state store
+    domain/             Pydantic models + enums (the shared vocabulary)
+    interfaces/         AgentAdapter / store protocols
     storage/            SQLite repositories
-    api/                FastAPI + WebSocket
-    cli/                Typer CLI
-    security/           Redaction + sandbox
-  web/                  React dashboard
-  tests/
+    api/                FastAPI + WebSocket + token auth
+    cli/                Typer CLI, interactive terminal, onboarding
+    security/           Redaction + execution sandbox
+  web/                  React dashboard (built, then served by `aether serve`)
+  tests/                99 tests: unit, end-to-end, failure scenarios
 ```
 
 ---
@@ -353,6 +441,23 @@ aether/
 
 ---
 
+## Development
+
+```bash
+pip install -e ".[dev]"
+pytest -q                      # 99 tests
+ruff check --select F,E9 src tests
+cd web && npm ci && npm run build
+```
+
+CI runs the suite on Linux and Windows against Python 3.11 and 3.12, plus the
+dashboard typecheck and build. See [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
+
+Changes worth knowing about are in [`CHANGELOG.md`](CHANGELOG.md), including the
+open issues that are known and not yet fixed.
+
+---
+
 ## License
 
-Apache-2.0
+Apache-2.0 — see [LICENSE](LICENSE).

@@ -10,12 +10,11 @@ import time
 from typing import Any, AsyncIterator, Optional
 
 from aether.adapters.base import BaseAdapter
-from aether.domain.enums import FailureClass, HandoffStatus, ProviderAvailability, VerificationStatus
+from aether.domain.enums import FailureClass, ProviderAvailability
 from aether.domain.models import (
     AuthStatus,
     ExecutionRequest,
     ExecutionResult,
-    HandoffReport,
     HealthStatus,
     ProviderConfig,
     StreamChunk,

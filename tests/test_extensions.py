@@ -13,7 +13,7 @@ from aether.core.budget import BudgetExceeded, BudgetManager
 from aether.core.event_bus import EventBus
 from aether.core.metrics import MetricsCollector
 from aether.core.workspace import WorkspaceManager
-from aether.domain.enums import ApprovalLevel, TaskMode, TaskStatus
+from aether.domain.enums import TaskMode, TaskStatus
 
 
 @pytest.mark.asyncio

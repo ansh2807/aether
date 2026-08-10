@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import re
-from typing import Any, AsyncIterator, Optional
+from typing import Any, AsyncIterator
 
 from aether.domain.enums import FailureClass, HandoffStatus, ProviderAvailability
 from aether.domain.models import (
     AuthStatus,
     CapabilityProfile,
     ExecutionRequest,
-    ExecutionResult,
     HandoffReport,
     HealthStatus,
     LimitSnapshot,

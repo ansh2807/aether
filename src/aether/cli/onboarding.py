@@ -432,8 +432,8 @@ def build_app_from_profile(profile: UserProfile, config_path: Optional[str] = No
     merged["providers"] = providers
 
     settings = settings_from_dict(merged)
-    # force reload global app
-    app = get_app(force_reload=True)
+    # force reload global app (called for the side effect on the module global)
+    get_app(force_reload=True)
     # replace settings by constructing new app with our settings
     from aether.app import AetherApp as AppCls
     import aether.app as app_mod

@@ -7,11 +7,9 @@ Uses the installed `opencode` CLI (https://opencode.ai). Model format:
 from __future__ import annotations
 
 import asyncio
-import json
 import shutil
 import time
-from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
 from aether.adapters.base import BaseAdapter
 from aether.domain.enums import FailureClass, ProviderAvailability

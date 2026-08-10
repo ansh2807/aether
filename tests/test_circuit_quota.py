@@ -1,6 +1,5 @@
 """Circuit breaker and quota tests."""
 
-import asyncio
 
 from aether.core.circuit import CircuitBreaker
 from aether.core.quota import QuotaManager

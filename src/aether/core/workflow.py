@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from aether.domain.enums import AgentRole, SubtaskStatus, TaskMode
-from aether.domain.models import Subtask, Task, new_id
+from aether.domain.models import Subtask, Task
 
 
 class WorkflowEngine:

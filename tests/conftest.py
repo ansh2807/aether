@@ -8,8 +8,6 @@ from pathlib import Path
 import pytest
 import pytest_asyncio
 
-from aether.adapters.mock_adapter import MockAdapter
-from aether.adapters.registry import AgentRegistry
 from aether.app import AetherApp
 from aether.config.settings import (
     AetherSettings,

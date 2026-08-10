@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
 
 from aether.domain.enums import ApprovalLevel
 from aether.config.settings import SecuritySettings

@@ -13,8 +13,7 @@ from typing import Any, Optional
 import yaml
 from pydantic import BaseModel, Field
 
-from aether.domain.enums import AdapterType, TaskMode
-from aether.domain.models import ProviderConfig
+from aether.domain.enums import TaskMode
 
 
 class UserProfile(BaseModel):

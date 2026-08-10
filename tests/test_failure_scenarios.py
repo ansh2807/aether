@@ -12,7 +12,7 @@ from aether.adapters.unavailable import UnavailableAdapter
 from aether.app import AetherApp
 from aether.core.circuit import CircuitBreaker
 from aether.domain.enums import AdapterType, FailureClass, HandoffStatus, TaskStatus
-from aether.domain.models import ExecutionRequest, ProviderConfig, HandoffReport
+from aether.domain.models import ExecutionRequest, ProviderConfig
 from aether.config.settings import CircuitBreakerSettings
 
 

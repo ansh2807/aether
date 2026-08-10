@@ -7,7 +7,7 @@
 Or:
 
 ```powershell
-cd C:\Users\anshk\Desktop\aether
+cd %USERPROFILE%\Desktop\aether
 .\run.bat
 ```
 
@@ -39,7 +39,7 @@ Typing `aether` in a normal terminal fails unless the **virtualenv is activated*
 `aether` is installed at:
 
 ```text
-C:\Users\anshk\Desktop\aether\.venv\Scripts\aether.exe
+%USERPROFILE%\Desktop\aether\.venv\Scripts\aether.exe
 ```
 
 It is **not** on your global PATH by default.
@@ -59,7 +59,7 @@ Open a terminal **in the project folder**, or double-click:
 ### Examples
 
 ```bat
-cd C:\Users\anshk\Desktop\aether
+cd %USERPROFILE%\Desktop\aether
 
 run.bat doctor
 run.bat run "Build a small Python hello module"
@@ -73,7 +73,7 @@ run.bat serve
 ## Correct PowerShell sequence
 
 ```powershell
-cd C:\Users\anshk\Desktop\aether
+cd %USERPROFILE%\Desktop\aether
 .\.venv\Scripts\Activate.ps1
 aether doctor
 aether run "Build a small Python hello module"
@@ -88,7 +88,7 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 Or **skip activation** and call the full path:
 
 ```powershell
-cd C:\Users\anshk\Desktop\aether
+cd %USERPROFILE%\Desktop\aether
 .\.venv\Scripts\aether.exe doctor
 .\.venv\Scripts\aether.exe run "Build a small Python hello module"
 .\.venv\Scripts\aether.exe serve
@@ -99,7 +99,7 @@ cd C:\Users\anshk\Desktop\aether
 ## Start the API (dashboard backend)
 
 ```powershell
-cd C:\Users\anshk\Desktop\aether
+cd %USERPROFILE%\Desktop\aether
 .\.venv\Scripts\aether.exe serve
 ```
 
@@ -111,7 +111,7 @@ You should see: `{"status":"ok","version":"0.1.0"}`
 Build it once; `aether serve` then hosts it at the same address as the API:
 
 ```powershell
-cd C:\Users\anshk\Desktop\aether\web
+cd %USERPROFILE%\Desktop\aether\web
 npm install
 npm run build
 ```
@@ -129,7 +129,7 @@ front-end tree is dev-server-only, so prefer the build above for normal use.
 This completed successfully on this machine:
 
 ```powershell
-cd C:\Users\anshk\Desktop\aether
+cd %USERPROFILE%\Desktop\aether
 .\.venv\Scripts\aether.exe run "Build a tiny hello script"
 ```
 

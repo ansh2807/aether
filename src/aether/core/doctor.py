@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 import shutil
 import sys
-from pathlib import Path
 from typing import Any
 
 from aether import __version__
@@ -25,7 +24,7 @@ async def run_doctor(app: AetherApp) -> dict[str, Any]:
 
     # DB
     try:
-        tasks = await app.tasks.list(limit=1)
+        await app.tasks.list(limit=1)  # probe: raises if the DB is unreachable
         add("database", True, f"reachable ({app.settings.database_url.split('///')[-1][:60]})")
     except Exception as exc:  # noqa: BLE001
         add("database", False, str(exc), "error")

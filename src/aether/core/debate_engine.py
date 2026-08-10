@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import Any, Optional
 
 from aether.core.chat_session import ChatMessage, ChatRouter, ChatSession
-from aether.domain.models import ExecutionRequest
 
 
 class DebateEngine:

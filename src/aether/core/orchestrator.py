@@ -40,7 +40,6 @@ from aether.domain.models import (
     Subtask,
     Task,
     TaskMemory,
-    utcnow,
 )
 from aether.observability.logging import get_logger
 from aether.storage.repository import FileAuditLogger, SqliteRepository
@@ -1006,7 +1005,7 @@ class Orchestrator:
             f"# AETHER Task Result: {task.task_id}",
             "",
             f"**Goal:** {task.normalized_goal}",
-            f"**Status:** COMPLETED",
+            "**Status:** COMPLETED",
             f"**Mode:** {task.mode.value}",
             f"**Agents:** {', '.join(task.participating_agents) or 'none'}",
             "",

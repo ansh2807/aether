@@ -2,7 +2,7 @@
 
 from aether.adapters.base import BaseAdapter
 from aether.domain.enums import HandoffStatus, TaskStatus, TASK_TRANSITIONS
-from aether.domain.models import ContextPackage, Task, new_task_id
+from aether.domain.models import ContextPackage, new_task_id
 
 
 def test_task_id_format():

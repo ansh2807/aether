@@ -9,7 +9,6 @@ from aether.domain.models import (
     ExecutionRequest,
     ExecutionResult,
     HealthStatus,
-    ProviderConfig,
     utcnow,
 )
 

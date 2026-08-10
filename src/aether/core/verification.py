@@ -7,7 +7,6 @@ import ast
 import py_compile
 import shutil
 from pathlib import Path
-from tempfile import TemporaryDirectory
 from typing import Optional
 
 from aether.domain.enums import VerificationStatus

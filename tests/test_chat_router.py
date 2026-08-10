@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from aether.app import AetherApp
-from aether.core.chat_session import ChatMessage, ChatSession, SessionCompactor
+from aether.core.chat_session import ChatMessage, SessionCompactor
 from aether.core.context_budget import ContextBudget, estimate_tokens
 from aether.domain.enums import FailureClass
 

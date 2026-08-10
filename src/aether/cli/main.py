@@ -368,7 +368,7 @@ def serve_cmd(
             dashboard = f"http://{h}:{p}/?token={token}"
         else:
             dashboard = (
-                f"not built [dim](cd web && npm install && npm run build, then restart)[/]"
+                "not built [dim](cd web && npm install && npm run build, then restart)[/]"
             )
         console.print(
             Panel.fit(
