@@ -4,11 +4,17 @@
 
 **Double-click:** `START_HERE.bat`
 
-Or:
+From a terminal, in the project folder (note the leading `.\`):
 
 ```powershell
 cd %USERPROFILE%\Desktop\aether
 .\run.bat
+```
+
+Or from **any** folder, by full path (no `cd` needed):
+
+```powershell
+& "$env:USERPROFILE\Desktop\aether\aether.bat"
 ```
 
 AETHER will ask you, in order:
@@ -50,22 +56,27 @@ It is **not** on your global PATH by default.
 
 Open a terminal **in the project folder**, or double-click:
 
+> In a terminal these need the `.\` prefix (`.\run.bat`). PowerShell always requires it,
+> and this machine also has `NoDefaultCurrentDirectoryInExePath=1`, so even `cmd`
+> will not find a bare `run.bat`.
+
 | File | What it does |
 |------|----------------|
 | `START_HERE.bat` | Full turn-on wizard + chat |
-| `run.bat` | Same; or pass commands e.g. `run.bat doctor` |
+| `run.bat` | Same; or pass commands: `.\run.bat doctor` |
 | `serve.bat` | Starts the API server on http://127.0.0.1:7420 |
+| `aether.bat` | Same CLI, callable **from any folder** by full path |
 
 ### Examples
 
 ```bat
 cd %USERPROFILE%\Desktop\aether
 
-run.bat doctor
-run.bat run "Build a small Python hello module"
-run.bat status
-run.bat task list
-run.bat serve
+.\run.bat doctor
+.\run.bat run "Build a small Python hello module"
+.\run.bat status
+.\run.bat task list
+.\run.bat serve
 ```
 
 ---
@@ -141,7 +152,8 @@ Result: `status=COMPLETED` with files under `workspace\TASK-...`
 
 | You type | Problem | Fix |
 |----------|---------|-----|
-| `aether` (from anywhere) | Not on PATH | `cd` to project + activate venv, or use `run.bat` |
+| `aether` (from anywhere) | Not on PATH | `cd` to the project and use `.\run.bat`, or call `aether.bat` by full path |
+| `'run.bat' is not recognized` (in the project folder!) | `NoDefaultCurrentDirectoryInExePath=1` stops the shell searching the current folder | prefix it: `.\run.bat` |
 | `aether` without activate | Command not found | `.\.venv\Scripts\Activate.ps1` first |
 | Dashboard only | No backend | Run `serve.bat` / `aether serve` first |
 | Expecting Claude/GPT without config | Only **mock** is enabled | Enable providers in config + API keys/CLIs |

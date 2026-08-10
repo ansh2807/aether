@@ -12,10 +12,11 @@ echo.
 echo   Starting AETHER terminal session...
 echo   (login wizard + agent REPL, like Claude Code / Open Code)
 echo.
-if not exist ".venv\Scripts\aether.exe" (
-  call run.bat doctor
+
+if not exist "%~dp0.venv\Scripts\aether.exe" (
+  call "%~dp0run.bat" doctor
 )
-call .venv\Scripts\activate.bat
-aether
+
+"%~dp0.venv\Scripts\aether.exe"
 echo.
 pause

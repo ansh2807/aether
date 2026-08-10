@@ -8,24 +8,27 @@ chcp 65001 >nul 2>&1
 set PYTHONUTF8=1
 set PYTHONIOENCODING=utf-8
 
-if not exist ".venv\Scripts\python.exe" (
+REM Every path below is anchored at this script's folder (%~dp0). Bare names
+REM would fail where NoDefaultCurrentDirectoryInExePath=1 stops the shell
+REM searching the current directory.
+set "AETHER_EXE=%~dp0.venv\Scripts\aether.exe"
+
+if not exist "%~dp0.venv\Scripts\python.exe" (
   echo [AETHER] Creating virtual environment...
-  python -m venv .venv
+  python -m venv "%~dp0.venv"
   if errorlevel 1 (
     echo Failed to create venv. Is Python installed?
     pause
     exit /b 1
   )
   echo [AETHER] Installing package...
-  call .venv\Scripts\pip install -e ".[dev]"
+  call "%~dp0.venv\Scripts\pip.exe" install -e ".[dev]"
   if errorlevel 1 (
     echo Install failed.
     pause
     exit /b 1
   )
 )
-
-call .venv\Scripts\activate.bat
 
 if "%~1"=="" (
   echo.
@@ -35,10 +38,10 @@ if "%~1"=="" (
   echo   then agent REPL  (type a goal, or /help)
   echo  ========================================
   echo.
-  aether
+  "%AETHER_EXE%"
   pause
 ) else (
-  aether %*
+  "%AETHER_EXE%" %*
 )
 
 endlocal
