@@ -291,7 +291,7 @@ async def test_cli_adapter_writes_output_as_it_arrives(tmp_path: Path):
 async def test_orchestrator_salvages_an_interrupted_run(app):
     """A partial log left by a dead runner becomes a handoff, not lost work."""
     from aether.domain.enums import SubtaskStatus
-    from aether.domain.models import Subtask, Task
+    from aether.domain.models import Subtask
     from aether.execution_log import ExecutionLog
 
     task = await app.tasks.create_task("Build a module")

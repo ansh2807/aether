@@ -7,8 +7,11 @@ Uses the installed `opencode` CLI (https://opencode.ai). Model format:
 from __future__ import annotations
 
 import asyncio
+import os
 import shutil
+import tempfile
 import time
+from pathlib import Path
 from typing import Optional
 
 from aether.adapters.base import BaseAdapter
@@ -25,6 +28,11 @@ from aether.observability.logging import get_logger
 from aether.security.sandbox import ExecutionSandbox, SecurityError
 
 log = get_logger("aether.adapters.opencode")
+
+# Windows caps a process's total command line around 32KB. A prompt longer than
+# this goes through a temp file over stdin instead of as an argv element, so it
+# never blows that limit and never opaquely fails the exec call.
+PROMPT_STDIN_THRESHOLD_CHARS = 8000
 
 
 def opencode_bin() -> Optional[str]:
@@ -182,6 +190,7 @@ class OpencodeCliAdapter(BaseAdapter):
             model = str(request.metadata["model"])
 
         cwd = request.workspace_path or None
+        use_stdin = len(request.prompt) > PROMPT_STDIN_THRESHOLD_CHARS
         argv = [
             path,
             "run",
@@ -189,8 +198,9 @@ class OpencodeCliAdapter(BaseAdapter):
             model,
             "--format",
             "default",
-            request.prompt,
         ]
+        if not use_stdin:
+            argv.append(request.prompt)
         # Optional auto-approve for autonomous agent runs (sandbox still applies at AETHER level)
         if (self.config.extra or {}).get("auto", False):
             argv.insert(2, "--auto")
@@ -215,9 +225,20 @@ class OpencodeCliAdapter(BaseAdapter):
             execution_id=request.execution_id,
         )
 
+        prompt_file: Optional[Path] = None
+        stdin_handle = None
+        if use_stdin:
+            fd, tmp_name = tempfile.mkstemp(prefix="aether_opencode_prompt_", suffix=".txt")
+            prompt_file = Path(tmp_name)
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(request.prompt)
+
         try:
+            if use_stdin:
+                stdin_handle = open(prompt_file, "rb")
             proc = await asyncio.create_subprocess_exec(
                 *argv,
+                stdin=stdin_handle,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=cwd,
@@ -254,6 +275,13 @@ class OpencodeCliAdapter(BaseAdapter):
         finally:
             self._procs.pop(request.execution_id, None)
             self._active.pop(request.execution_id, None)
+            if stdin_handle is not None:
+                stdin_handle.close()
+            if prompt_file is not None:
+                try:
+                    prompt_file.unlink(missing_ok=True)
+                except OSError:
+                    pass
 
         stdout = (stdout_b or b"")[: self.max_output_bytes].decode("utf-8", errors="replace")
         stderr = (stderr_b or b"")[: self.max_output_bytes].decode("utf-8", errors="replace")

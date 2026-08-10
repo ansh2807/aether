@@ -179,6 +179,7 @@ class VerificationEngine:
         return VerificationStatus.PARTIAL
 
     async def _run(self, argv: list[str], cwd: Path, timeout: int) -> tuple[int, str]:
+        proc: Optional[asyncio.subprocess.Process] = None
         try:
             proc = await asyncio.create_subprocess_exec(
                 *argv,
@@ -188,5 +189,11 @@ class VerificationEngine:
             )
             out_b, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
             return proc.returncode or 0, (out_b or b"").decode("utf-8", errors="replace")
+        except asyncio.TimeoutError:
+            # never leave the child running orphaned past the timeout
+            if proc is not None and proc.returncode is None:
+                proc.kill()
+                await proc.wait()
+            return 1, f"timed out after {timeout}s"
         except Exception as exc:  # noqa: BLE001
             return 1, str(exc)

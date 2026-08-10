@@ -715,8 +715,11 @@ class ChatRouter:
                 continue
 
             full = "".join(chunks)
-            if stream_error or not full.strip():
-                # fallback to non-stream execute once
+            if stream_error:
+                # fallback to non-stream execute once — but only on a genuine
+                # stream error. BaseAdapter.stream() is itself implemented by
+                # calling execute(), so an empty-but-successful reply must be
+                # accepted as-is, not paid for twice.
                 try:
                     result = await adapter.execute(req)
                 except Exception as exc:  # noqa: BLE001

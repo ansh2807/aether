@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import Optional
 
 from aether.adapters.registry import AgentRegistry
@@ -9,10 +10,16 @@ from aether.config.settings import AetherSettings
 from aether.core.circuit import CircuitBreaker
 from aether.core.quota import QuotaManager
 from aether.domain.enums import AgentRole, ProviderAvailability
-from aether.domain.models import RouteDecision, Subtask, Task
+from aether.domain.models import HealthStatus, RouteDecision, Subtask, Task
+from aether.interfaces.adapters import AgentAdapter
 from aether.observability.logging import get_logger
 
 log = get_logger("aether.router")
+
+# health_check() can be a live HTTP request for API providers. Routing calls it
+# once per candidate per subtask, so without a cache a 5-subtask task probes
+# every provider 5 times. Cache each result for this long before re-probing.
+HEALTH_CACHE_TTL_SECONDS = 30.0
 
 ROLE_CAPABILITY = {
     AgentRole.ARCHITECT: "architecture",
@@ -39,6 +46,21 @@ class AgentRouter:
         self.registry = registry
         self.quota = quota
         self.circuit = circuit
+        self._health_cache: dict[str, tuple[float, HealthStatus]] = {}
+
+    def invalidate_health(self, provider_id: str) -> None:
+        """Drop a provider's cached health result — call this when it fails."""
+        self._health_cache.pop(provider_id, None)
+
+    async def _cached_health(self, provider_id: str, adapter: AgentAdapter) -> HealthStatus:
+        """health_check() with a short TTL cache (see HEALTH_CACHE_TTL_SECONDS)."""
+        cached = self._health_cache.get(provider_id)
+        now = time.monotonic()
+        if cached is not None and (now - cached[0]) < HEALTH_CACHE_TTL_SECONDS:
+            return cached[1]
+        health = await adapter.health_check()
+        self._health_cache[provider_id] = (now, health)
+        return health
 
     def _has_real_provider(self) -> bool:
         """True when at least one non-testing provider is enabled and registered."""
@@ -88,7 +110,7 @@ class AgentRouter:
             adapter = self.registry.get(pid)
             if adapter is None:
                 continue
-            health = await adapter.health_check()
+            health = await self._cached_health(pid, adapter)
             if not health.available and not cfg.for_testing:
                 continue
 
@@ -166,6 +188,8 @@ class AgentRouter:
         subtask: Optional[Subtask] = None,
         role: Optional[AgentRole] = None,
     ) -> Optional[RouteDecision]:
+        # the provider just failed — its cached health is now stale
+        self.invalidate_health(failed_provider)
         exclude = [failed_provider]
         if self.settings.routing.prefer_different_agent_on_failover:
             exclude.extend(task.participating_agents[-1:] if task.participating_agents else [])
