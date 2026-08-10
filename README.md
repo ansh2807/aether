@@ -466,10 +466,9 @@ dashboard typecheck and build. See [`.github/workflows/ci.yml`](.github/workflow
 Changes worth knowing about are in [`CHANGELOG.md`](CHANGELOG.md), including the
 open issues that are known and not yet fixed.
 
-Where the project is going: [`docs/ROADMAP.md`](docs/ROADMAP.md) — the plan is
-built around one bet, *never losing work*, and is written as work orders with
-acceptance criteria. The defect and debt register is
-[`docs/IMPROVEMENT_PLAN.md`](docs/IMPROVEMENT_PLAN.md).
+Where the project is going: [`docs/ROADMAP.md`](docs/ROADMAP.md) — the whole
+plan in one file. One bet (*never losing work*), an honest gap table, and 22
+work orders with acceptance criteria.
 
 ---
 
