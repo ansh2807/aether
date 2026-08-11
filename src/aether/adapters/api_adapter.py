@@ -6,6 +6,7 @@ Requires API key from environment variable named in config (never from task memo
 
 from __future__ import annotations
 
+import json
 import os
 import time
 from typing import Any, AsyncIterator, Optional
@@ -14,6 +15,7 @@ import httpx
 
 from aether.adapters.base import BaseAdapter
 from aether.domain.enums import FailureClass, ProviderAvailability
+from aether.execution_log import ExecutionLog
 from aether.domain.models import (
     AuthStatus,
     ExecutionRequest,
@@ -138,6 +140,115 @@ class ApiAgentAdapter(BaseAdapter):
         """
         return await self._execute_with_retry(lambda: self._execute_once(request))
 
+    def _error_result(
+        self, request: ExecutionRequest, status: int, text: str, start: float
+    ) -> ExecutionResult:
+        """Classify an HTTP error the same way on both the streaming and the
+        buffered path, so a 401 does not mean one thing over SSE and another
+        over a plain POST."""
+        if status == 429:
+            failure = FailureClass.RATE_LIMIT
+        elif status in (401, 403):
+            failure = FailureClass.AUTH
+        else:
+            failure = self.classify_error(text)
+        self._record_failure()
+        return ExecutionResult(
+            execution_id=request.execution_id,
+            provider_id=self.provider_id,
+            success=False,
+            error=text[:500] if status in (401, 403, 429) else f"HTTP {status}: {text[:500]}",
+            failure_class=failure,
+            latency_ms=(time.perf_counter() - start) * 1000,
+        )
+
+    async def _execute_streaming(
+        self,
+        request: ExecutionRequest,
+        url: str,
+        body: dict,
+        headers: dict,
+        exec_log: "ExecutionLog",
+        start: float,
+    ) -> Optional[ExecutionResult]:
+        """Run the request over SSE, mirroring output to disk as it arrives.
+
+        This is the API-side half of the durability bet. A buffered POST holds
+        the entire response in memory until it completes, so killing the process
+        at minute nine of a ten-minute generation loses all of it — the CLI
+        adapter has streamed to disk since WO-02, and API providers did not,
+        which became the larger gap once the catalogue filled with them.
+
+        Returns `None` when streaming is not usable (the endpoint rejects it, or
+        sends nothing parseable), so the caller falls back to the buffered path
+        rather than failing a request that would otherwise have worked. Not
+        every OpenAI-compatible server implements SSE.
+        """
+        stream_body = {**body, "stream": True}
+        pieces: list[str] = []
+        try:
+            async with self._client.stream(
+                "POST", url, json=stream_body, headers=headers,
+                timeout=request.timeout_seconds,
+            ) as resp:
+                if resp.status_code >= 400:
+                    await resp.aread()
+                    text = resp.text
+                    # 400/404/422 most likely mean "this server does not stream";
+                    # fall back rather than reporting a provider error.
+                    if resp.status_code in (400, 404, 422):
+                        return None
+                    return self._error_result(request, resp.status_code, text, start)
+
+                async for line in resp.aiter_lines():
+                    if not line.startswith("data:"):
+                        continue
+                    payload = line[5:].strip()
+                    if not payload or payload == "[DONE]":
+                        continue
+                    try:
+                        chunk = json.loads(payload)
+                        delta = chunk["choices"][0].get("delta") or {}
+                        piece = delta.get("content") or ""
+                    except (ValueError, KeyError, IndexError):
+                        continue
+                    if piece:
+                        pieces.append(piece)
+                        # the whole point: on disk before the process can die
+                        exec_log.append(piece)
+        except httpx.TimeoutException:
+            # Not a fallback case. Partial output is already on disk, and the
+            # buffered path would only wait all over again.
+            self._record_failure()
+            return ExecutionResult(
+                execution_id=request.execution_id,
+                provider_id=self.provider_id,
+                success=False,
+                error="API timeout",
+                failure_class=FailureClass.TIMEOUT,
+                latency_ms=(time.perf_counter() - start) * 1000,
+            )
+        except httpx.HTTPError:
+            return None  # let the buffered path classify it
+
+        content = "".join(pieces)
+        if not content:
+            return None  # nothing arrived; the buffered path may still work
+
+        handoff = self.parse_handoff(
+            request.task_id, self.provider_id, content, requested=request.prompt[:300]
+        )
+        self._record_request(tokens=len(content) // 4)
+        return ExecutionResult(
+            execution_id=request.execution_id,
+            provider_id=self.provider_id,
+            success=True,
+            output=content,
+            handoff=handoff,
+            latency_ms=(time.perf_counter() - start) * 1000,
+            raw={"model": self.config.model, "streamed": True},
+        )
+
     async def _execute_once(self, request: ExecutionRequest) -> ExecutionResult:
         start = time.perf_counter()
         await self.initialize()
@@ -176,6 +287,21 @@ class ApiAgentAdapter(BaseAdapter):
             "Authorization": f"Bearer {key}",
             "Content-Type": "application/json",
         }
+        # Stream when there is somewhere to mirror to, so a kill mid-generation
+        # leaves salvageable output on disk. Falls through to the buffered POST
+        # below if the endpoint cannot stream.
+        exec_log = ExecutionLog.for_request(request.workspace_path, request.subtask_id)
+        if exec_log is not None:
+            self._active[request.execution_id] = True
+            try:
+                streamed = await self._execute_streaming(
+                    request, url, body, headers, exec_log, start
+                )
+            finally:
+                self._active.pop(request.execution_id, None)
+            if streamed is not None:
+                return streamed
+
         self._active[request.execution_id] = True
         try:
             resp = await self._client.post(url, json=body, headers=headers, timeout=request.timeout_seconds)

@@ -22,7 +22,7 @@ pytest tests/test_durability.py tests/test_retry.py tests/test_export_resume.py 
 | Transient network blip | ✅ | retried on the same provider with full-jitter backoff *before* any failover; the circuit breaker sees one failure, not one per try | `test_two_network_failures_then_success_same_provider`, `test_timeout_is_retried_like_network`, `test_retries_exhausted_makes_exactly_retries_plus_one_attempts` |
 | A failure retrying cannot fix | ✅ | `AUTH`, `QUOTA`, `POLICY_DENIED`, `CONTEXT`, `CANCELLED` fail over immediately instead of burning attempts | `test_auth_failure_returns_immediately_zero_retries`, `test_permanent_failure_classes_are_never_retried` |
 | **Orchestrator is SIGKILLed mid-subtask** | ✅ | a fresh orchestrator over the same data dir requeues and finishes the task; no subtask runs twice; nothing is left stranded | `test_task_survives_sigkill_mid_subtask` (3 kill offsets), `test_recovery_is_recorded_not_silent` |
-| **Agent output in flight when killed** | ⚠️ partial | CLI-adapter output is mirrored to disk as it arrives and salvaged into a `PARTIAL` handoff on the next attempt — **API and Open Code adapters do not yet capture** (see below) | `test_cli_adapter_writes_output_as_it_arrives`, `test_orchestrator_salvages_an_interrupted_run` |
+| **Agent output in flight when killed** | ⚠️ mostly | CLI **and API** adapter output is mirrored to disk as it arrives and salvaged into a `PARTIAL` handoff on the next attempt. API providers stream over SSE to achieve this, falling back to a buffered request only where the server cannot stream — **Open Code still buffers** (see below) | `test_cli_adapter_writes_output_as_it_arrives`, `test_output_reaches_disk_before_the_response_completes`, `test_partial_output_survives_an_abandoned_stream`, `test_orchestrator_salvages_an_interrupted_run` |
 | Subtask stranded `RUNNING` by a dead runner | ✅ | reclaimed to `READY` rather than spinning the lifecycle forever | `test_stranded_running_subtask_is_reclaimed` |
 | A DAG that can never progress | ✅ | fails loudly with `Deadlocked; no runnable subtasks remain: [...]` instead of hanging | `test_unsatisfiable_dependency_fails_instead_of_hanging` |
 | Long task outgrows the context window | ✅ | the package is budgeted against the *target provider's* window and compacted; assignment, goal and next action are never dropped | `test_package_fits_a_small_window`, `test_what_survives_compaction_is_what_the_agent_needs`, `test_long_task_runs_to_completion_without_a_context_failure` |
@@ -46,13 +46,24 @@ can still lose work.
 
 ### In-flight output from API and Open Code providers
 
-Only `CliAgentAdapter` mirrors output to the execution log. `ApiAgentAdapter` and
-`OpencodeCliAdapter` still buffer their whole response in memory, so killing the
-process mid-request loses everything received so far from those providers.
+`CliAgentAdapter` and `ApiAgentAdapter` both mirror output to the execution log
+as it arrives. `OpencodeCliAdapter` still buffers its whole response in memory,
+so killing the process mid-request loses everything received so far from that
+one provider.
 
-The salvage machinery is provider-agnostic — it reads whatever is on disk — so
-this is a matter of wiring the remaining two adapters, tracked as the deferred
-half of WO-02 and as WO-12 (live streaming) in [`ROADMAP.md`](ROADMAP.md).
+Two limits worth stating plainly rather than leaving to be discovered:
+
+- **API capture depends on the server supporting SSE.** The adapter requests a
+  stream and falls back to a buffered POST when the endpoint rejects it
+  (`test_falls_back_when_the_server_cannot_stream`). On a fallback there is
+  nothing to salvage — the guarantee degrades to the old behaviour rather than
+  failing the request. Most of the catalogue streams; not all of it will.
+- **Salvage needs a workspace to write into.** Calls without one — health
+  checks, ad-hoc execution — take the buffered path by design.
+
+The salvage machinery itself is provider-agnostic: it reads whatever is on disk.
+Wiring Open Code is the last piece, tracked as the deferred half of WO-02 in
+[`ROADMAP.md`](ROADMAP.md).
 
 ### Machine reboot is inferred, not directly tested
 

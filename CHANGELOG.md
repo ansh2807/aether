@@ -6,6 +6,27 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Hardening pass over the orchestrator, control-plane state, local API and CLI.
 
+### Fixed — API providers lost in-flight output when killed
+
+- **The API adapter now streams and mirrors to disk as output arrives.** It
+  issued one buffered POST and held the whole response in memory, so a kill at
+  minute nine of a ten-minute generation lost all of it. The CLI adapter has
+  streamed since WO-02; this was the other half, and it became the larger half
+  once the catalogue filled with hosted APIs.
+- Falls back to the buffered request when a server cannot stream, so SSE support
+  is an optimisation rather than a requirement. On that path there is nothing to
+  salvage — `docs/DURABILITY.md` says so rather than implying a guarantee that
+  depends on the provider.
+- A 401 or 429 is classified identically on both paths and is **not** re-sent as
+  a fallback: the answer is the same either way, and WO-23 now treats `AUTH` as
+  terminal, so getting the classification right matters more than it used to.
+- Verified by mutation: reverting to buffered, or buffering the chunks and
+  writing once at the end, both fail the tests. The second only fails because
+  the test samples the log *during* the stream — asserting after it completes
+  would have passed against the old adapter too.
+- `docs/DURABILITY.md` moves this row from "partial" to "mostly"; Open Code is
+  now the only adapter that still buffers.
+
 ### Added — routing hardening (WO-23, WO-24)
 
 - **A revoked API key is no longer retried forever.** `record_failure` took only
