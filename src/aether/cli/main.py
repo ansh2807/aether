@@ -805,8 +805,59 @@ def checkpoint_list(
 
 
 @app.command("doctor")
-def doctor_cmd(config: Optional[str] = typer.Option(None, "--config", "-c")) -> None:
+def doctor_cmd(
+    config: Optional[str] = typer.Option(None, "--config", "-c"),
+    durability: bool = typer.Option(
+        False, "--durability", help="Report which durability guarantees hold on THIS install"
+    ),
+) -> None:
     """Run system diagnostics."""
+
+    async def _durability() -> None:
+        from aether.core.doctor import run_durability_doctor
+
+        application = await _boot(config)
+        report = await run_durability_doctor(application)
+        summary = report["summary"]
+        durable = bool(summary["durable"])
+
+        table = data_table(
+            "",
+            {"header": "Guarantee", "no_wrap": True},
+            {"header": "Detail", "no_wrap": True, "overflow": "ellipsis"},
+            title="Durability on this install",
+            show_header=False,
+        )
+        for c in report["checks"]:
+            table.add_row(
+                check_text(bool(c["ok"])),
+                c["guarantee"] if c["ok"] else f"[warn]{c['guarantee']}[/]",
+                f"[muted]{truncate(str(c['detail']), 56)}[/]",
+            )
+        console.print()
+        console.print(table)
+
+        # A void guarantee is only useful if you know what it costs you.
+        for c in report["checks"]:
+            if not c["ok"] and c["impact"]:
+                console.print(f"  [err]{SYM['fail']}[/] [warn]{c['guarantee']}[/] {DASH} {c['impact']}")
+
+        console.print(
+            Panel(
+                f"[{'ok' if durable else 'warn'}]"
+                f"{SYM['ok'] if durable else SYM['warn']} "
+                f"{summary['holding']}/{summary['guarantees']} guarantees hold[/]\n"
+                f"[muted]Full list and what proves each: docs/DURABILITY.md[/]",
+                border_style="ok" if durable else "warn",
+                padding=(0, 2),
+            )
+        )
+        if not durable:
+            raise typer.Exit(1)
+
+    if durability:
+        _run(_durability())
+        return
 
     async def _go() -> None:
         from aether.core.doctor import run_doctor

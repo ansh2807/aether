@@ -116,9 +116,28 @@ that one did.
 ## Verifying your own install
 
 ```bash
-aether doctor          # git, workspace writability, state dir, database
+aether doctor --durability     # which guarantees hold on THIS machine
 pytest tests/test_durability.py -q
 ```
 
-`WO-09` adds `aether doctor --durability`, which will report which of the
-guarantees above hold on *your* machine rather than in CI.
+`--durability` reports each guarantee above against your actual install, and
+when one is void it says what that costs you rather than just failing. It exits
+non-zero if any guarantee is void, so it works in a pre-flight script.
+
+A guarantee CI proves but your box cannot honour is worse than no guarantee,
+because you would plan around it. Typical local results: the capture guarantee
+is void whenever an API or Open Code provider is enabled, and the checkpoint
+guarantee is void without git on PATH.
+
+## Re-proving this continuously
+
+The table above is re-checked nightly by
+[`.github/workflows/chaos.yml`](../.github/workflows/chaos.yml), on Linux and
+Windows, killing the orchestrator at **randomised** offsets rather than the
+three fixed ones the fast suite uses — a fixed set can pass forever while a
+whole class of interleavings stays broken. A failed nightly run opens an issue
+against itself.
+
+```bash
+AETHER_CHAOS=1 AETHER_CHAOS_ROUNDS=20 pytest tests/test_durability.py -q
+```

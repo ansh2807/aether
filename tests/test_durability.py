@@ -335,3 +335,106 @@ async def wait_terminal_app(app, task_id: str, timeout: float = 40.0):
             return t
         await aio.sleep(0.1)
     raise TimeoutError((await app.tasks.get(task_id)).status.value)
+
+
+# --- WO-08: randomised chaos, nightly only -------------------------------
+
+
+@pytest.mark.skipif(
+    not __import__("os").environ.get("AETHER_CHAOS"),
+    reason="chaos run: set AETHER_CHAOS=1 (nightly CI does)",
+)
+@pytest.mark.asyncio
+async def test_randomised_kill_offsets(tmp_path: Path):
+    """Kill at unpredictable points, not the three the suite always uses.
+
+    Fixed offsets can pass forever while a whole class of interleavings stays
+    broken. This is the job that is allowed to be slow and is allowed to find
+    something the fast suite cannot.
+    """
+    import random
+
+    rounds = int(__import__("os").environ.get("AETHER_CHAOS_ROUNDS", "5"))
+    failures: list[str] = []
+
+    for attempt in range(rounds):
+        root = tmp_path / f"aether-{attempt}"
+        root.mkdir()
+        runner_dir = tmp_path / f"runner-{attempt}"
+        runner_dir.mkdir(exist_ok=True)
+        script = _write_runner(runner_dir)
+
+        first = _start(script, root, delay=0.7)
+        try:
+            task_id = _read_task_id(first)
+        except AssertionError as exc:
+            failures.append(f"round {attempt}: {exc}")
+            first.kill()
+            continue
+
+        time.sleep(random.uniform(0.3, 2.4))
+        if first.poll() is None:
+            first.kill()
+        first.wait(timeout=30)
+
+        second = _start(script, root, delay=0.05, task_id=task_id)
+        second.wait(timeout=180)
+
+        final, events = await _load(root, task_id)
+        if final is None or final.status.value != "COMPLETED":
+            failures.append(
+                f"round {attempt}: {final.status.value if final else 'gone'}"
+                f" / {final.failure_reason if final else ''}"
+            )
+            continue
+        stranded = [s.title for s in final.subtasks if s.status.value == "RUNNING"]
+        if stranded:
+            failures.append(f"round {attempt}: stranded {stranded}")
+
+    assert not failures, "randomised kills did not recover:\n" + "\n".join(failures)
+
+
+# --- WO-09: the durability self-check ------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_durability_doctor_reports_holding_guarantees(app):
+    from aether.core.doctor import run_durability_doctor
+
+    report = await run_durability_doctor(app)
+    names = [c["guarantee"] for c in report["checks"]]
+    assert "Task state survives restart" in names
+    assert "In-flight output is salvageable" in names
+    assert report["summary"]["guarantees"] == len(report["checks"])
+
+
+@pytest.mark.asyncio
+async def test_durability_doctor_names_the_void_guarantee(app, tmp_path: Path):
+    """A broken install must say which guarantee it just lost, and why."""
+    from aether.core.doctor import run_durability_doctor
+
+    # a file where the workspace root should be: mkdir cannot succeed
+    blocked = tmp_path / "not-a-directory"
+    blocked.write_text("", encoding="utf-8")
+    app.settings.workspace_root = blocked
+
+    report = await run_durability_doctor(app)
+    void = [c for c in report["checks"] if not c["ok"]]
+    salvage = [c for c in void if c["guarantee"] == "In-flight output is salvageable"]
+
+    assert salvage, f"broken workspace did not void the salvage guarantee: {void}"
+    assert salvage[0]["impact"], "a void guarantee must say what it costs you"
+    assert report["summary"]["durable"] is False
+
+
+@pytest.mark.asyncio
+async def test_durability_doctor_flags_buffering_providers(app):
+    """The mock buffers, so the capture guarantee must not claim to hold."""
+    from aether.core.doctor import run_durability_doctor
+
+    report = await run_durability_doctor(app)
+    capture = [
+        c for c in report["checks"] if c["guarantee"] == "Every provider's output is captured"
+    ]
+    assert capture and capture[0]["ok"] is False
+    assert "mock" in capture[0]["detail"]

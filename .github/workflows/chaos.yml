@@ -1,0 +1,86 @@
+name: Chaos
+
+# The durability claim is only worth what it is re-proven to be. This job kills
+# a running orchestrator at unpredictable points and requires the task to still
+# finish. It is nightly rather than per-push because it is slow by design and
+# because the failures worth catching are timing-dependent — a fixed set of kill
+# offsets can pass forever while a whole class of interleavings stays broken.
+
+on:
+  schedule:
+    - cron: "17 3 * * *"        # 03:17 UTC daily
+  workflow_dispatch:
+    inputs:
+      rounds:
+        description: "Randomised kill rounds per platform"
+        required: false
+        default: "10"
+
+permissions:
+  contents: read
+  issues: write                  # so a failure can file itself
+
+concurrency:
+  group: chaos
+  cancel-in-progress: false
+
+jobs:
+  chaos:
+    name: chaos (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false           # one platform failing must not hide the other
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      - name: Randomised kill / recover
+        env:
+          AETHER_CHAOS: "1"
+          AETHER_CHAOS_ROUNDS: ${{ github.event.inputs.rounds || '10' }}
+        run: pytest tests/test_durability.py -q -p no:randomly
+
+      - name: Cross-machine resume
+        run: pytest tests/test_export_resume.py -q
+
+      - name: Retry and circuit behaviour
+        run: pytest tests/test_retry.py -q
+
+  report:
+    name: file an issue if chaos broke
+    needs: chaos
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Open an issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh issue create \
+            --repo "${{ github.repository }}" \
+            --title "Nightly chaos run failed ($(date -u +%Y-%m-%d))" \
+            --label durability \
+            --body "The nightly chaos run did not recover cleanly.
+
+          A failure here means a task did **not** survive being killed mid-flight,
+          which is the guarantee documented in \`docs/DURABILITY.md\`. Treat it as
+          a real regression until shown otherwise — the fast suite cannot catch
+          this class of bug.
+
+          Run: $RUN_URL
+
+          Reproduce locally:
+          \`\`\`bash
+          AETHER_CHAOS=1 AETHER_CHAOS_ROUNDS=20 pytest tests/test_durability.py -q
+          \`\`\`"

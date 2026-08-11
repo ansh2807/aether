@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 import sys
+from pathlib import Path
 from typing import Any
 
 from aether import __version__
@@ -91,4 +92,122 @@ async def run_doctor(app: AetherApp) -> dict[str, Any]:
         },
         "checks": checks,
         "providers": [h.model_dump(mode="json") for h in health],
+    }
+
+
+# --- durability self-check (WO-09) ---------------------------------------
+#
+# `run_doctor` answers "is this install working". This answers the different
+# question "what can this install survive" — which guarantee in
+# docs/DURABILITY.md holds *here*, on this machine, with this config. A
+# guarantee that CI proves but your box cannot honour is worse than no
+# guarantee, because you would plan around it.
+
+
+async def run_durability_doctor(app: AetherApp) -> dict[str, Any]:
+    checks: list[dict[str, Any]] = []
+
+    def add(guarantee: str, ok: bool, detail: str, impact: str = "") -> None:
+        checks.append(
+            {
+                "guarantee": guarantee,
+                "ok": ok,
+                "detail": detail,
+                # what you lose when this one is false
+                "impact": "" if ok else impact,
+            }
+        )
+
+    settings = app.settings
+
+    # 1. Task state survives a restart at all.
+    try:
+        await app.tasks.list(limit=1)
+        add("Task state survives restart", True, f"database reachable ({settings.database_url.split('///')[-1][-48:]})")
+    except Exception as exc:  # noqa: BLE001
+        add(
+            "Task state survives restart", False, str(exc)[:120],
+            "Nothing is recoverable: tasks are not being persisted.",
+        )
+
+    # 2. Agents can write, and their output can be captured for salvage.
+    workspace = Path(settings.workspace_root)
+    try:
+        workspace.mkdir(parents=True, exist_ok=True)
+        probe = workspace / ".durability_probe"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink(missing_ok=True)
+        add("In-flight output is salvageable", True, f"workspace writable ({workspace})")
+    except OSError as exc:
+        add(
+            "In-flight output is salvageable", False, f"{workspace}: {exc}",
+            "A killed agent's partial work cannot be written, so it is lost.",
+        )
+
+    # 3. Control-plane state is shared between the CLI and the server.
+    state_dir = Path(settings.data_dir) / "state"
+    try:
+        from aether.core.state_store import JsonStateStore
+
+        store = JsonStateStore(state_dir / ".durability_probe.json")
+        with store.transaction():
+            store.save({"probe": True})
+        store.path.unlink(missing_ok=True)
+        store.lock_path.unlink(missing_ok=True)
+        add("CLI and server see the same state", True, f"state dir lockable ({state_dir})")
+    except Exception as exc:  # noqa: BLE001
+        add(
+            "CLI and server see the same state", False, f"{state_dir}: {exc}"[:120],
+            "Approvals, metrics and quota will diverge between processes.",
+        )
+
+    # 4. Checkpoints need git.
+    git = shutil.which("git")
+    if not settings.orchestrator.enable_git_checkpoints:
+        add("Work is checkpointed to git", False, "disabled in config",
+            "Recovery falls back to task memory only; file-level history is lost.")
+    elif git:
+        add("Work is checkpointed to git", True, git)
+    else:
+        add("Work is checkpointed to git", False, "git not on PATH",
+            "Recovery falls back to task memory only; file-level history is lost.")
+
+    # 5. Salvage only covers adapters that stream to disk.
+    capturing, buffering = [], []
+    for provider_id in app.registry.list_ids():
+        cfg = app.registry.get_config(provider_id)
+        if cfg is None or not (cfg.enabled or cfg.for_testing):
+            continue
+        adapter = app.registry.get(provider_id)
+        # CliAgentAdapter mirrors output as it arrives; the others buffer it
+        (capturing if type(adapter).__name__ == "CliAgentAdapter" else buffering).append(provider_id)
+    if buffering:
+        add(
+            "Every provider's output is captured", False,
+            f"buffered in memory: {', '.join(sorted(buffering))}",
+            "A kill mid-request loses in-flight output from these providers.",
+        )
+    else:
+        add("Every provider's output is captured", True, ", ".join(sorted(capturing)) or "none enabled")
+
+    # 6. Retry has to be switched on to absorb a blip.
+    retries = settings.orchestrator.network_retries
+    if retries > 0:
+        add("Transient blips are retried", True, f"network_retries={retries}")
+    else:
+        add(
+            "Transient blips are retried", False, "network_retries=0",
+            "One dropped connection immediately costs a failover.",
+        )
+
+    void = [c for c in checks if not c["ok"]]
+    return {
+        "version": __version__,
+        "summary": {
+            "guarantees": len(checks),
+            "holding": len(checks) - len(void),
+            "void": len(void),
+            "durable": not void,
+        },
+        "checks": checks,
     }
