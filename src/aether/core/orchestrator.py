@@ -733,16 +733,20 @@ class Orchestrator:
                 f"Assignment: {sub.title}",
             )
 
-            # optional per-agent git branch
+            # Optional per-agent worktree. Each agent gets its own checkout of
+            # the same repo, so concurrent subtasks edit real files at the same
+            # time instead of fighting over one shared working tree.
             agent_branch = None
+            agent_dir = task.workspace_path
             if (
                 self.settings.orchestrator.enable_agent_branches
                 and task.workspace_path
                 and task.mode in (TaskMode.PARALLEL, TaskMode.COLLAB, TaskMode.DEBATE)
             ):
-                agent_branch = await self.workspace_mgr.checkout_agent_branch(
+                agent_branch, worktree = await self.workspace_mgr.create_agent_worktree(
                     Path(task.workspace_path), provider_id, sub.subtask_id
                 )
+                agent_dir = str(worktree)
 
             req = ExecutionRequest(
                 task_id=task_id,
@@ -751,7 +755,7 @@ class Orchestrator:
                 role=sub.role,
                 prompt=prompt,
                 context_package=pkg.model_dump(mode="json"),
-                workspace_path=task.workspace_path,
+                workspace_path=agent_dir,
                 timeout_seconds=self.settings.orchestrator.agent_timeout_seconds,
             )
 
@@ -912,10 +916,13 @@ class Orchestrator:
                 memory = await self.handoffs.apply_to_memory(memory, handoff)
                 self.metrics.record_task_event(task_id, "handoff", provider=provider_id)
 
-                # commit agent branch and merge when using branches
+                # Commit inside the agent's own worktree, then merge from the
+                # primary tree. The merge stays inside this lock because it
+                # mutates the one shared checkout — only the editing above is
+                # genuinely concurrent.
                 if agent_branch and task.workspace_path:
                     await self.workspace_mgr.commit_agent_work(
-                        Path(task.workspace_path), provider_id, handoff.recommended_next_action or sub.title
+                        Path(agent_dir), provider_id, handoff.recommended_next_action or sub.title
                     )
                     ok, conflicts, detail = await self.workspace_mgr.merge_to_main(
                         Path(task.workspace_path), agent_branch
@@ -923,6 +930,8 @@ class Orchestrator:
                     if not ok:
                         memory.known_issues.append(f"merge_conflict: {', '.join(conflicts)}")
                         await self.repo.save_memory(memory)
+                        # the worktree stays put: a human resolving the conflict
+                        # needs the agent's version still on disk
                         await self.tasks.timeline(
                             task_id, "orchestrator", "merge_conflict", ", ".join(conflicts) or detail[:200]
                         )
@@ -945,6 +954,11 @@ class Orchestrator:
                             order=90,
                         )
                         await apply(lambda t, s, cs=conflict_sub: t.subtasks.append(cs))
+                    else:
+                        # merged cleanly: the checkout has served its purpose
+                        await self.workspace_mgr.remove_agent_worktree(
+                            Path(task.workspace_path), agent_branch
+                        )
 
                 # index artifacts
                 for art in result.artifacts:

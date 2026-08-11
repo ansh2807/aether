@@ -69,6 +69,64 @@ class WorkspaceManager:
             await self._run(workspace, "checkout", "-b", branch)
         return branch
 
+    # --- per-agent worktrees (WO-17) -------------------------------------
+    #
+    # `checkout_agent_branch` switches the ONE shared working tree, so two
+    # agents cannot hold different branches at once — which is why the
+    # post-execution phase had to be serialised under a lock and "parallel"
+    # mode was only parallel during model calls. A worktree gives each agent
+    # its own checkout of the same repository, so they can genuinely edit at
+    # the same time and still merge through the normal path.
+
+    def worktree_path(self, workspace: Path, branch: str) -> Path:
+        """Where an agent's private checkout lives.
+
+        Kept beside the task workspace rather than inside it: a worktree nested
+        in its own repository confuses status and would be swept into commits.
+        Still under workspace_root, so the execution sandbox accepts it as cwd.
+        """
+        safe = branch.replace("/", "_")
+        return workspace.parent / ".worktrees" / workspace.name / safe
+
+    async def create_agent_worktree(
+        self, workspace: Path, provider_id: str, subtask_id: str
+    ) -> tuple[str, Path]:
+        """Give this agent its own checkout. Returns (branch, working dir)."""
+        await self.ensure_repo(workspace)
+        branch = self.agent_branch(provider_id, subtask_id)
+        if not self.enable_git:
+            return branch, workspace
+
+        target = self.worktree_path(workspace, branch)
+        if target.exists():
+            # a previous run of this same subtask; reuse rather than fail
+            return branch, target
+        target.parent.mkdir(parents=True, exist_ok=True)
+
+        base = await self.base_branch(workspace) or "HEAD"
+        code, text = await self._run(
+            workspace, "worktree", "add", "-B", branch, str(target), base
+        )
+        if code != 0:
+            # Worktrees are an optimisation, not a correctness requirement:
+            # fall back to the shared tree rather than failing the subtask.
+            log.warning("worktree_add_failed", branch=branch, detail=text[:200])
+            await self.checkout_agent_branch(workspace, provider_id, subtask_id)
+            return branch, workspace
+        return branch, target
+
+    async def remove_agent_worktree(self, workspace: Path, branch: str) -> None:
+        """Drop the checkout once its work has been merged."""
+        if not self.enable_git:
+            return
+        target = self.worktree_path(workspace, branch)
+        if not target.exists():
+            return
+        code, text = await self._run(workspace, "worktree", "remove", "--force", str(target))
+        if code != 0:
+            log.warning("worktree_remove_failed", branch=branch, detail=text[:200])
+            await self._run(workspace, "worktree", "prune")
+
     async def commit_agent_work(
         self,
         workspace: Path,
