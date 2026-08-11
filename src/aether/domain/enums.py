@@ -78,6 +78,12 @@ class CircuitState(str, Enum):
     CLOSED = "CLOSED"
     OPEN = "OPEN"
     HALF_OPEN = "HALF_OPEN"
+    # Terminal. OPEN is a timer — it half-opens and probes again. Some
+    # failures are not waiting problems: a revoked API key is still revoked
+    # sixty seconds later, and each probe spends a real subtask attempt on a
+    # request that cannot succeed. DISABLED never reopens on a clock; only an
+    # explicit operator action clears it. See CircuitBreaker.TERMINAL_FAILURES.
+    DISABLED = "DISABLED"
 
 
 class ProviderAvailability(str, Enum):

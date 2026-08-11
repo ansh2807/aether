@@ -534,7 +534,7 @@ class ChatRouter:
                 result = await adapter.execute(req)
             except Exception as exc:  # noqa: BLE001
                 last_error = str(exc)
-                self.app.circuit.record_failure(provider)
+                self.app.circuit.record_failure(provider, FailureClass.CRASH)
                 self.app.quota.record_failure(provider)
                 switched = await self.switch_provider(session, provider, f"exception:{exc}")
                 events.append(f"failover_exception:{provider}")
@@ -549,7 +549,7 @@ class ChatRouter:
             if not result.success:
                 last_error = result.error or "failed"
                 fc = result.failure_class or FailureClass.UNKNOWN
-                self.app.circuit.record_failure(provider)
+                self.app.circuit.record_failure(provider, fc)
                 self.app.quota.record_failure(provider)
                 if fc == FailureClass.RATE_LIMIT:
                     self.app.quota.set_cooldown(provider, 60)
@@ -705,7 +705,7 @@ class ChatRouter:
                         break
             except Exception as exc:  # noqa: BLE001
                 last_error = str(exc)
-                self.app.circuit.record_failure(provider)
+                self.app.circuit.record_failure(provider, FailureClass.CRASH)
                 self.app.quota.record_failure(provider)
                 switched = await self.switch_provider(session, provider, f"exception:{exc}")
                 yield {"type": "event", "event": f"failover_exception:{provider}", "provider": switched}
@@ -733,7 +733,7 @@ class ChatRouter:
                 if not result.success:
                     last_error = result.error or "failed"
                     fc = result.failure_class or FailureClass.UNKNOWN
-                    self.app.circuit.record_failure(provider)
+                    self.app.circuit.record_failure(provider, fc)
                     self.app.quota.record_failure(provider)
                     if fc == FailureClass.RATE_LIMIT:
                         self.app.quota.set_cooldown(provider, 60)

@@ -335,8 +335,7 @@ rotation. That distinction is the fix.
   `TIMEOUT`, `NETWORK`, `CRASH`.
 - A `DISABLED` provider is skipped by the router and reported as such by
   `aether providers` / `aether doctor`, with the reason and how to clear it.
-- Clearing is explicit — `aether connect <id>` succeeding, or
-  `aether providers reset <id>`. Never a timer, because a timer is what we are
+- Clearing is explicit — never a timer, because a timer is what we are
   removing.
 
 **Acceptance:** a provider returning 401 is attempted **once**, then skipped —
@@ -365,9 +364,11 @@ just never asked for it.
 **Build:**
 - An in-flight count per provider, read by `select()` as a load penalty term
   (`routing.weights.load`, defaulting low so capability still dominates).
-- Power-of-two-choices rather than strict least-loaded: sample two viable
-  candidates, take the less busy. Cheap, and it avoids the herd stampeding onto
-  whichever provider is momentarily idle.
+- ~~Power-of-two-choices~~ — **built as a deterministic penalty instead.** P2C
+  guards against *stale* load information; the count is incremented at dispatch
+  and read at the next selection, so there is none to be stale. A random
+  tie-break would have bought nothing and cost the reproducibility that makes a
+  routing decision explicable.
 - Add the load term to the existing `reasons` list, so a decision stays
   auditable.
 
@@ -379,6 +380,18 @@ the parallel-write fix was.
 
 **Cost:** small-to-medium. Localised to `router.select()` plus a counter the
 orchestrator already maintains.
+
+> **Both shipped.** Five deliberate mutations were run against the tests; all
+> five are caught. The fifth had to be *added*: deleting `note_dispatch` from
+> the orchestrator initially left every WO-24 test green, because they all
+> called the counter by hand and so proved the router worked while proving
+> nothing about whether anything fed it.
+>
+> One acceptance criterion above was wrong and is corrected here. Breaker state
+> is in-memory and never persisted, so the planned `aether providers reset <id>`
+> would have run against a fresh empty breaker in the CLI process and done
+> nothing. DISABLED lasts for the life of the process, a restart clears it, and
+> the operator message says so.
 
 ---
 

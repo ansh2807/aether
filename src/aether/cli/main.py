@@ -286,6 +286,12 @@ def providers_cmd(config: Optional[str] = typer.Option(None, "--config", "-c")) 
             note = cfg.status_note or ""
             if cfg.for_testing:
                 note = note or f"testing only {DASH} never used as failover"
+            # A provider taken out of rotation for a terminal failure must say
+            # so. Silently dropping one is how "why is nothing using my key"
+            # becomes an afternoon.
+            breaker = application.circuit.snapshot(cfg.provider_id)
+            if breaker.disabled_reason:
+                note = breaker.disabled_reason
             table.add_row(
                 f"[value]{cfg.provider_id}[/]" if cfg.enabled else f"[muted]{cfg.provider_id}[/]",
                 cfg.display_name,

@@ -779,6 +779,11 @@ class Orchestrator:
                 }
             )
 
+            # Tell the router this provider is busy for the duration, so a
+            # sibling subtask selecting concurrently sees the load and can pick
+            # someone else. try/finally, because a provider left counted as busy
+            # after a crash would be quietly deprioritised forever.
+            self.router.note_dispatch(provider_id)
             try:
                 result = await adapter.execute(req)
                 # broadcast output for live UI (no second provider call)
@@ -796,13 +801,18 @@ class Orchestrator:
             except Exception as exc:  # noqa: BLE001
                 result = None
                 last_error = str(exc)
-                self.circuit.record_failure(provider_id)
+                self.circuit.record_failure(provider_id, FailureClass.CRASH)
                 self.quota.record_failure(provider_id)
                 self.metrics.record_agent_execution(provider_id, 0.0, False, task_id=task_id)
                 await self._failover_prep(task, memory, provider_id, str(exc), FailureClass.CRASH)
                 exclude.append(provider_id)
                 attempts += 1
                 continue
+            finally:
+                # Runs on the `continue` too. Without this, a provider that
+                # crashed would stay counted as busy and be deprioritised for
+                # the lifetime of the process.
+                self.router.note_complete(provider_id)
 
             tokens = len(result.output or "") // 4
             self.quota.record_request(provider_id, tokens=tokens)
@@ -846,7 +856,7 @@ class Orchestrator:
                     )
                     return
 
-                self.circuit.record_failure(provider_id)
+                self.circuit.record_failure(provider_id, fc)
                 self.quota.record_failure(provider_id)
                 if fc == FailureClass.RATE_LIMIT:
                     self.quota.set_cooldown(provider_id, 60)

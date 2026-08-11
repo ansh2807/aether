@@ -21,6 +21,11 @@ log = get_logger("aether.router")
 # every provider 5 times. Cache each result for this long before re-probing.
 HEALTH_CACHE_TTL_SECONDS = 30.0
 
+# In-flight count at which the load penalty is fully applied. Four matches the
+# default max_concurrent_subtasks: by the time a provider holds the whole
+# concurrency budget it should be maximally unattractive, and no more so.
+LOAD_SATURATION = 4
+
 ROLE_CAPABILITY = {
     AgentRole.ARCHITECT: "architecture",
     AgentRole.IMPLEMENTER: "coding",
@@ -47,6 +52,36 @@ class AgentRouter:
         self.quota = quota
         self.circuit = circuit
         self._health_cache: dict[str, tuple[float, HealthStatus]] = {}
+        # provider_id -> subtasks currently executing on it
+        self._inflight: dict[str, int] = {}
+
+    # --- concurrent load ------------------------------------------------
+    #
+    # Selection used to be stateless with respect to work already running, so
+    # N subtasks dispatched together scored identically and all chose the same
+    # provider — queueing behind one rate limit while healthy providers idled.
+    # Parallel mode is precisely where that hurts.
+    #
+    # The count is incremented at dispatch and decremented on completion, so it
+    # is always current by the time the next selection reads it. That is what
+    # makes a plain deterministic penalty sufficient here: the classic
+    # thundering-herd problem needs *stale* load information, and there is none
+    # to be stale. (The roadmap sketched power-of-two-choices for this; a
+    # random tie-break would buy nothing over fresh counts and would cost the
+    # reproducibility that makes routing decisions explicable.)
+
+    def note_dispatch(self, provider_id: str) -> None:
+        self._inflight[provider_id] = self._inflight.get(provider_id, 0) + 1
+
+    def note_complete(self, provider_id: str) -> None:
+        remaining = self._inflight.get(provider_id, 0) - 1
+        if remaining > 0:
+            self._inflight[provider_id] = remaining
+        else:
+            self._inflight.pop(provider_id, None)
+
+    def inflight(self, provider_id: str) -> int:
+        return self._inflight.get(provider_id, 0)
 
     def invalidate_health(self, provider_id: str) -> None:
         """Drop a provider's cached health result — call this when it fails."""
@@ -156,6 +191,16 @@ class AgentRouter:
             usage = self.quota.get_usage(pid)
             fail_penalty = min(usage.failures, 10) / 10.0
             score -= w.get("failure_history", 0.05) * fail_penalty
+
+            # concurrent load — spread parallel subtasks instead of stacking
+            # them on whichever provider scores best in the abstract. Saturates
+            # at LOAD_SATURATION so a busy provider is penalised, not banished:
+            # with one strong provider and one weak one, the strong one should
+            # still take the second subtask.
+            busy = self.inflight(pid)
+            if busy:
+                score -= w.get("load", 0.10) * min(busy, LOAD_SATURATION) / LOAD_SATURATION
+                reasons.append(f"inflight={busy}")
 
             # slight preference to stick with active agent for continuity (not on failover)
             if task.active_agent == pid and not exclude_set:

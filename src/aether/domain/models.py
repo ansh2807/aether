@@ -359,3 +359,7 @@ class CircuitSnapshot(BaseModel):
     opened_at: Optional[datetime] = None
     last_failure_at: Optional[datetime] = None
     last_success_at: Optional[datetime] = None
+    # Why the circuit went DISABLED, in words a human can act on. Surfaced by
+    # `aether providers` and `aether doctor` — a provider that has silently
+    # stopped being used is worse than one that failed loudly.
+    disabled_reason: Optional[str] = None

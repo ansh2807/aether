@@ -6,6 +6,29 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Hardening pass over the orchestrator, control-plane state, local API and CLI.
 
+### Added — routing hardening (WO-23, WO-24)
+
+- **A revoked API key is no longer retried forever.** `record_failure` took only
+  a provider id, so the breaker could not tell an expired credential from a
+  network blip — it opened for 60s, half-opened, spent a real subtask attempt on
+  a request that could not succeed, and repeated indefinitely. New `DISABLED`
+  circuit state for `AUTH` and `POLICY_DENIED`: one attempt, then out of
+  rotation, with a reason the operator can act on. `RATE_LIMIT` and `QUOTA` are
+  deliberately *not* terminal — they recover on a clock, which is what `OPEN`
+  is for.
+- **Concurrent subtasks now spread across providers.** Selection ignored work in
+  flight, so with `max_concurrent_subtasks: 4` all four dispatched subtasks
+  scored identically and stacked on one provider while healthy ones idled. The
+  router now keeps a per-provider in-flight count and applies a bounded load
+  penalty. A single subtask still picks the best provider — asserted, so spread
+  was not traded for quality.
+- The load term appears in the decision's `reasons`, keeping routing auditable.
+- Scope, stated plainly: breaker state is in-memory and never persisted, so
+  `DISABLED` lasts for the life of the process and a restart clears it. The
+  planned `aether providers reset <id>` was **dropped** — a separate CLI process
+  has its own empty breaker, so the command would have silently done nothing.
+  `aether providers` now shows the disabled reason instead.
+
 ### Fixed — intermittent `database is locked`
 
 - **SQLite ran with `journal_mode=delete` and `busy_timeout=5000`** (measured,

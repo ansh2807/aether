@@ -10,7 +10,7 @@ verification. Models are pluggable adapters — not the thing in charge.
 [![CI](https://github.com/ansh2807/aether/actions/workflows/ci.yml/badge.svg)](https://github.com/ansh2807/aether/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache--2.0-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-227-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-251-brightgreen.svg)](tests/)
 
 </div>
 
