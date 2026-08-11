@@ -6,6 +6,25 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Hardening pass over the orchestrator, control-plane state, local API and CLI.
 
+### Fixed — intermittent `database is locked`
+
+- **SQLite ran with `journal_mode=delete` and `busy_timeout=5000`** (measured,
+  not assumed). Under a rollback journal a writer takes an exclusive lock at
+  commit and blocks readers; five seconds of patience is not much on a loaded
+  two-core CI runner. This failed two CI runs in two unrelated tests, both on a
+  read racing an orchestrator write. Now `journal_mode=WAL` and a 30s busy
+  timeout, applied via a connect event guarded by dialect name so Postgres
+  never sees it.
+- `synchronous` is deliberately left at **FULL**. NORMAL is the usual companion
+  to WAL and is faster, but trades durability on OS crash or power loss, and
+  not losing work is the project's central promise. WAL alone fixes the
+  contention.
+- Side effect: the test suite got faster, ~85s to ~67s.
+- The new tests are explicit about which of them can actually catch a
+  regression. Restoring the old settings failed **only** the pragma assertion;
+  the concurrency tests passed against the broken configuration too and say so
+  in their docstrings rather than implying proof they do not provide.
+
 ### Added — contributor on-ramp and a runnable demo
 
 - **`CONTRIBUTING.md`**, issue templates (bug / feature / config) and a PR

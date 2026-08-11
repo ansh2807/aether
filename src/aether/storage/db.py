@@ -1,13 +1,18 @@
 """SQLAlchemy async engine and session.
 
-Backend-agnostic by design: everything here is plain SQLAlchemy Core/ORM, no
-SQLite-only pragmas, connect_args, or pool classes. `Database` is handed a
-`settings.database_url` and builds an async engine for whatever dialect that
-URL names — `sqlite+aiosqlite://` (the zero-setup default) or
-`postgresql+asyncpg://` (opt into it with the `postgres` extra: `pip install
-aether[postgres]`). See `storage/repository.py` and `storage/models.py` for
-the rest of the portability story — the ORM layer has no dialect-specific
-branches either.
+Backend-agnostic by design: every query here is plain SQLAlchemy Core/ORM with
+no dialect branches. `Database` is handed a `settings.database_url` and builds
+an async engine for whatever dialect that URL names — `sqlite+aiosqlite://`
+(the zero-setup default) or `postgresql+asyncpg://` (opt into it with the
+`postgres` extra: `pip install aether[postgres]`). See `storage/repository.py`
+and `storage/models.py` for the rest of the portability story — the ORM layer
+has no dialect-specific branches either.
+
+The one deliberate exception is `_configure_sqlite`, which sets WAL and a busy
+timeout on SQLite connections only. That is not a portability leak but a fix
+for a real intermittent failure: SQLite's default rollback journal has writers
+block readers, which produced `database is locked` in CI. It hangs off a
+connect event guarded by the dialect name, so Postgres never sees it.
 """
 
 from __future__ import annotations
@@ -15,6 +20,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
@@ -52,7 +58,49 @@ class Database:
         self.engine = create_async_engine(
             self.database_url, echo=False, future=True, pool_pre_ping=True
         )
+        self._configure_sqlite()
         self.session_factory = async_sessionmaker(self.engine, expire_on_commit=False, class_=AsyncSession)
+
+    # SQLite's defaults are wrong for a control plane that writes from several
+    # coroutines at once, and they caused real intermittent CI failures:
+    # `sqlite3.OperationalError: database is locked`, twice, in two unrelated
+    # tests. Measured defaults were journal_mode=delete and busy_timeout=5000.
+    #
+    #   journal_mode=delete  a writer holds an exclusive lock, so it blocks
+    #                        *readers* too. Both CI failures were reads racing
+    #                        an orchestrator write. WAL lets readers proceed
+    #                        against the last committed snapshot instead.
+    #   busy_timeout=5000    a contended writer gives up after 5s. On a loaded
+    #                        two-core CI runner that is not a generous budget.
+    #
+    # `synchronous` is deliberately left at FULL. NORMAL is the usual companion
+    # to WAL and is faster, but it trades away durability on OS crash or power
+    # loss, and not losing work is the one thing this project promises. WAL
+    # alone is what fixes the contention; weakening fsync is not required.
+    SQLITE_BUSY_TIMEOUT_MS = 30_000
+
+    def _configure_sqlite(self) -> None:
+        """Apply SQLite-only pragmas, on SQLite only.
+
+        The rest of this module is deliberately dialect-agnostic and stays that
+        way: this hangs off a connect event and is guarded by the dialect name,
+        so a Postgres URL never sees it.
+        """
+        if self.engine.dialect.name != "sqlite":
+            return
+
+        timeout_ms = self.SQLITE_BUSY_TIMEOUT_MS
+
+        @event.listens_for(self.engine.sync_engine, "connect")
+        def _set_pragmas(dbapi_connection, _record) -> None:  # pragma: no cover - event hook
+            cursor = dbapi_connection.cursor()
+            try:
+                # No-op for :memory: databases, which cannot use WAL — the
+                # pragma simply reports the mode it kept.
+                cursor.execute("PRAGMA journal_mode=WAL")
+                cursor.execute(f"PRAGMA busy_timeout={timeout_ms}")
+            finally:
+                cursor.close()
 
     async def create_all(self) -> None:
         # import models for metadata registration
