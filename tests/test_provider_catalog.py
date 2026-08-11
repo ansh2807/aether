@@ -212,3 +212,83 @@ def test_generated_config_loads_as_a_provider():
             assert cfg.command == p.command
         else:
             assert str(cfg.base_url).rstrip("/") == p.base_url.rstrip("/")
+
+
+# --- cost: "will it accept free models?" --------------------------------
+
+
+def test_every_provider_declares_a_known_cost():
+    from aether.config.providers import COST_LABEL
+
+    for p in ALL_PROVIDERS:
+        assert p.cost in COST_LABEL, f"{p.id} has cost={p.cost!r}, which nothing renders"
+
+
+def test_local_runtimes_are_free_not_free_tier():
+    """Local hardware has no allowance to run out. The distinction is the
+    whole point of having two words for it."""
+    from aether.config.providers import get
+
+    for pid in ("ollama", "lmstudio", "vllm"):
+        assert get(pid).cost == "free", f"{pid} should be 'free', not an allowance"
+
+
+def test_subscription_clis_are_not_advertised_as_free():
+    """A Claude plan has no per-token cost, but someone asking for free models
+    is not asking about a paid subscription."""
+    from aether.config.providers import get, is_free
+
+    for pid in ("claude_cli", "copilot_cli", "cursor_cli"):
+        p = get(pid)
+        assert p.cost == "subscription"
+        assert not is_free(p), f"{pid} would show up under --free"
+
+
+def test_paid_frontier_providers_are_not_marked_free():
+    from aether.config.providers import get, is_free
+
+    for pid in ("openai", "anthropic", "perplexity", "fireworks"):
+        assert not is_free(get(pid)), f"{pid} is metered and must not appear under --free"
+
+
+def test_free_filter_never_names_a_paid_model():
+    """The bug this prevents: OpenRouter's default is a paid frontier model, so
+    listing it under --free would hand someone a bill they did not expect."""
+    from aether.config.providers import free_model_for, get, is_free
+
+    router = get("openrouter")
+    assert is_free(router)
+    assert free_model_for(router).endswith(":free"), (
+        f"--free would show {free_model_for(router)}, which is billed"
+    )
+    assert free_model_for(router) != router.default_model
+
+
+def test_glm_is_present_and_free():
+    """The specific ask: genuinely-free hosted models like GLM."""
+    from aether.config.providers import free_model_for, get, is_free
+
+    glm = get("glm")
+    assert glm is not None, "GLM is one of the few strong no-cost hosted models"
+    assert is_free(glm)
+    assert "flash" in free_model_for(glm).lower()
+
+
+def test_at_least_one_free_option_exists_in_every_useful_shape():
+    """Someone with no budget should have a local option and a hosted one."""
+    from aether.config.providers import is_free, selectable
+
+    free = [p for p in selectable() if is_free(p)]
+    kinds = {p.kind for p in free}
+    assert "local" in kinds, "no zero-cost local runtime"
+    assert "api" in kinds, "no zero-cost hosted provider"
+    assert len(free) >= 8, f"only {len(free)} free options listed"
+
+
+def test_free_providers_still_carry_a_usable_endpoint():
+    from aether.config.providers import free_model_for, is_free, selectable
+
+    for p in selectable():
+        if is_free(p) and p.kind != "cli":
+            assert p.base_url.startswith("http"), f"{p.id}: no endpoint"
+            assert free_model_for(p), f"{p.id}: free but no model named"

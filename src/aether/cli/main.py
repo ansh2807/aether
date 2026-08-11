@@ -315,12 +315,23 @@ def models_cmd(
     ready_only: bool = typer.Option(
         False, "--ready", help="Only providers this machine can already reach"
     ),
+    free_only: bool = typer.Option(
+        False, "--free", help="Only providers usable without per-token charges"
+    ),
 ) -> None:
     """Every model provider AETHER can connect to, and which are ready here.
 
     Reads no database and boots nothing, so it works before `aether setup`.
     """
-    from aether.config.providers import KIND_LABEL, KIND_ORDER, is_ready, selectable
+    from aether.config.providers import (
+        COST_LABEL,
+        KIND_LABEL,
+        KIND_ORDER,
+        free_model_for,
+        is_free,
+        is_ready,
+        selectable,
+    )
 
     _load_local_secrets()
 
@@ -331,6 +342,8 @@ def models_cmd(
         if kind and kind != k:
             continue
         group = [p for p in selectable() if p.kind == k]
+        if free_only:
+            group = [p for p in group if is_free(p)]
         if needle:
             group = [p for p in group if needle in p.id.lower() or needle in p.name.lower()]
 
@@ -353,18 +366,24 @@ def models_cmd(
         table = data_table(
             "ID",
             "Provider",
-            "Default model",
+            "Model",
+            "Cost",
             {"header": "Ready", "justify": "center"},
             "How",
             title=KIND_LABEL[k],
         )
         for p, ready, how in rows:
+            # With --free, show the model that is actually free rather than a
+            # paid default — OpenRouter's default is a paid frontier model, so
+            # printing it under a "free" filter would be a billing surprise.
+            model = free_model_for(p) if free_only else (p.default_model or "-")
             table.add_row(
                 f"[value]{p.id}[/]" if ready else f"[muted]{p.id}[/]",
                 p.name,
-                truncate(p.default_model or "-", 30),
+                truncate(model or "-", 28),
+                COST_LABEL.get(p.cost, p.cost),
                 check_text(ready),
-                f"[muted]{truncate(how, 34)}[/]",
+                f"[muted]{truncate(how, 30)}[/]",
             )
         console.print(table)
         shown += len(rows)
@@ -379,7 +398,14 @@ def models_cmd(
         "[muted]'Ready' means the key or CLI is present on this machine, not that the\n"
         "endpoint has been called. `aether connect` is what proves it works.[/]"
     )
-    if not (ready_only or kind or search):
+    if free_only:
+        console.print(
+            "[muted]Free tiers change often — these come from vendor docs, not a "
+            "live check.\n'free' is local hardware and stays free; 'free tier' is "
+            "an allowance that can\nshrink or end. Subscription CLIs are excluded: "
+            "no per-token cost, but not free.[/]"
+        )
+    if not (ready_only or kind or search or free_only):
         unverified = [p for p in selectable() if not p.verified]
         console.print(
             f"[muted]{len(unverified)} entries were taken from vendor docs and never "

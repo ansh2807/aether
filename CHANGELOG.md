@@ -6,6 +6,25 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Hardening pass over the orchestrator, control-plane state, local API and CLI.
 
+### Added — free models are findable (`aether models --free`)
+
+- **The catalogue had no notion of cost**, and OpenRouter's default model was
+  `anthropic/claude-sonnet-4.5` — so anyone looking for something free could
+  have picked it and been billed. Providers now declare `cost` as `free`
+  (local hardware, never expires), `free_tier` (an allowance), `subscription`
+  (a plan you already pay for) or `paid`.
+- **`--free` names the model that is actually free**, not the default. For
+  OpenRouter that is `deepseek/deepseek-r1:free`; a test asserts it never
+  resolves to a billed one.
+- **GLM (Z.AI / Zhipu) and Cerebras added.** GLM-4.5-Flash is the strongest
+  genuinely-free hosted model in the catalogue.
+- `subscription` CLIs are deliberately **excluded** from `--free`. A Claude plan
+  has no per-token cost, but someone asking for free models is not asking about
+  a paid subscription.
+- The caveat is printed with the results: free tiers move constantly, these come
+  from vendor docs rather than a live check, and `free` (your hardware) is a
+  different promise from `free tier` (an allowance that can end).
+
 ### Added — closing the gap with a gateway
 
 Taken from the OmniRoute comparison, now that the differences had been written

@@ -436,6 +436,43 @@ providers:
     api_key_env: OPENROUTER_API_KEY
 
   # Hosted APIs (bring a key)
+  cerebras:
+    display_name: Cerebras
+    adapter: api
+    enabled: false
+    capabilities:
+      coding: 7
+      reasoning: 7
+      research: 6
+      testing: 6
+      review: 6
+      architecture: 6
+      terminal: 4
+    roles_preferred:
+    - tester
+    context_window: 128000
+    base_url: https://api.cerebras.ai/v1
+    model: llama-3.3-70b
+    api_key_env: CEREBRAS_API_KEY
+  glm:
+    display_name: GLM (Z.AI / Zhipu)
+    adapter: api
+    enabled: false
+    capabilities:
+      coding: 9
+      reasoning: 8
+      testing: 8
+      review: 8
+      architecture: 8
+      terminal: 5
+    roles_preferred:
+    - implementer
+    - tester
+    context_window: 128000
+    base_url: https://api.z.ai/api/paas/v4
+    model: glm-4.5-flash
+    api_key_env: ZHIPU_API_KEY
+    status_note: Mainland accounts use https://open.bigmodel.cn/api/paas/v4 instead.
   anthropic:
     display_name: Anthropic (Claude API)
     adapter: api

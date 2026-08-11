@@ -10,7 +10,7 @@ verification. Models are pluggable adapters — not the thing in charge.
 [![CI](https://github.com/ansh2807/aether/actions/workflows/ci.yml/badge.svg)](https://github.com/ansh2807/aether/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache--2.0-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-279-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-289-brightgreen.svg)](tests/)
 
 </div>
 
@@ -334,6 +334,31 @@ four groups:
 
 Anything speaking the OpenAI `/chat/completions` shape works even if it is not
 listed: use `openai_compatible` and set `base_url`.
+
+#### Running it for free
+
+```bash
+aether models --free
+```
+
+Three kinds of free, and the difference matters:
+
+| | Examples | Catch |
+| --- | --- | --- |
+| **Free** | Ollama, LM Studio, vLLM | Your hardware, your electricity. Never expires, nothing leaves the machine. |
+| **Free tier** | **GLM-4.5-Flash**, Gemini Flash, Groq, Cerebras, Mistral Small, Together, OpenRouter `:free` models | An allowance that can shrink or be withdrawn. |
+| **Your plan** | Claude Code, Copilot, Cursor | No per-token charge, but you already pay for it — excluded from `--free`. |
+
+`--free` shows the model that is *actually* free, not the default. That
+distinction is the point: OpenRouter's default is a paid frontier model, so
+listing it under "free" would hand you a bill you did not expect.
+
+> Free tiers move constantly. These come from vendor documentation, not a live
+> check, and none are `verified` — see the caveat above. Check the provider's
+> current terms before relying on one.
+
+A no-budget setup that works: **GLM-4.5-Flash** for implementation, **Groq** for
+fast test runs, **Ollama** locally as the failover that can never rate-limit.
 
 > **`Ready` means the key or CLI is present, not that the endpoint answered.**
 > Most catalogue entries were transcribed from vendor documentation and have

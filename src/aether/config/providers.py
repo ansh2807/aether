@@ -49,6 +49,19 @@ class MarketProvider:
     # Has this endpoint actually been exercised from AETHER? Almost always no.
     verified: bool = False
     note: str = ""
+    # What it costs to use. "free" means genuinely nothing (local hardware);
+    # "free_tier" means a usable allowance before payment; "subscription"
+    # means an existing plan with no per-token charge; "paid" means metered.
+    #
+    # Free tiers move constantly — providers add, shrink and withdraw them —
+    # so this is a documented starting point, never a promise. `verified`
+    # stays the flag for "we actually called it".
+    cost: str = "paid"
+    # A model on this provider known to be usable at no cost, where the
+    # default is not. OpenRouter is the case that matters: its default is a
+    # paid frontier model, so asking for "free" and getting billed would be a
+    # nasty surprise.
+    free_model: str = ""
 
 
 # --- hosted APIs, OpenAI chat-completions shape --------------------------
@@ -79,6 +92,7 @@ API_PROVIDERS: list[MarketProvider] = [
         key_url="https://aistudio.google.com/apikey",
         context_window=1_000_000, capabilities=dict(FRONTIER),
         roles_preferred=("researcher", "tester", "implementer"),
+        cost="free_tier", free_model="gemini-2.0-flash",
     ),
     MarketProvider(
         "grok", "Grok (xAI)", "api",
@@ -103,6 +117,7 @@ API_PROVIDERS: list[MarketProvider] = [
         default_model="mistral-large-latest", key_url="https://console.mistral.ai/api-keys/",
         context_window=128_000, capabilities=dict(CODING),
         roles_preferred=("implementer",),
+        cost="free_tier", free_model="mistral-small-latest",
     ),
     MarketProvider(
         "groq", "Groq", "api",
@@ -111,6 +126,7 @@ API_PROVIDERS: list[MarketProvider] = [
         default_model="llama-3.3-70b-versatile", key_url="https://console.groq.com/keys",
         context_window=128_000, capabilities=dict(FAST),
         roles_preferred=("tester", "researcher"),
+        cost="free_tier", free_model="llama-3.3-70b-versatile",
     ),
     MarketProvider(
         "together", "Together AI", "api",
@@ -119,6 +135,7 @@ API_PROVIDERS: list[MarketProvider] = [
         default_model="meta-llama/Llama-3.3-70B-Instruct-Turbo",
         key_url="https://api.together.ai/settings/api-keys",
         context_window=128_000, capabilities=dict(FAST),
+        cost="free_tier", free_model="meta-llama/Llama-3.3-70B-Instruct-Turbo-Free",
     ),
     MarketProvider(
         "fireworks", "Fireworks AI", "api",
@@ -145,6 +162,26 @@ API_PROVIDERS: list[MarketProvider] = [
         roles_preferred=("implementer", "researcher"),
     ),
     MarketProvider(
+        "glm", "GLM (Z.AI / Zhipu)", "api",
+        "GLM-4.5-Flash is free with no token cap — the strongest genuinely-free "
+        "hosted model in this catalogue",
+        base_url="https://api.z.ai/api/paas/v4", api_key_env="ZHIPU_API_KEY",
+        default_model="glm-4.5-flash", key_url="https://z.ai/manage-apikey/apikey-list",
+        context_window=128_000, capabilities=dict(CODING),
+        roles_preferred=("implementer", "tester"),
+        cost="free_tier", free_model="glm-4.5-flash",
+        note="Mainland accounts use https://open.bigmodel.cn/api/paas/v4 instead.",
+    ),
+    MarketProvider(
+        "cerebras", "Cerebras", "api",
+        "Free tier on very fast open-weight inference",
+        base_url="https://api.cerebras.ai/v1", api_key_env="CEREBRAS_API_KEY",
+        default_model="llama-3.3-70b", key_url="https://cloud.cerebras.ai/",
+        context_window=128_000, capabilities=dict(FAST),
+        roles_preferred=("tester",),
+        cost="free_tier", free_model="llama-3.3-70b",
+    ),
+    MarketProvider(
         "qwen", "Qwen (DashScope)", "api",
         "Alibaba's Qwen models, OpenAI-compatible mode",
         base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
@@ -165,6 +202,7 @@ AGGREGATORS: list[MarketProvider] = [
         default_model="anthropic/claude-sonnet-4.5", key_url="https://openrouter.ai/keys",
         context_window=200_000, capabilities=dict(FRONTIER),
         roles_preferred=("architect", "implementer", "reviewer"),
+        cost="free_tier", free_model="deepseek/deepseek-r1:free",
     ),
     MarketProvider(
         "omniroute", "OmniRoute (local gateway)", "aggregator",
@@ -176,6 +214,7 @@ AGGREGATORS: list[MarketProvider] = [
         context_window=128_000, capabilities=dict(FRONTIER),
         roles_preferred=("implementer", "researcher"),
         note="Breadth via a gateway you run: its provider terms are its own to honour, not ours to restate.",
+        cost="free_tier",
     ),
     MarketProvider(
         "openai_compatible", "Any OpenAI-compatible endpoint", "api",
@@ -194,6 +233,7 @@ LOCAL_PROVIDERS: list[MarketProvider] = [
         base_url="http://127.0.0.1:11434/v1", api_key_env="",
         default_model="llama3.2", key_url="https://ollama.com/download",
         context_window=32_000, capabilities=dict(FAST),
+        cost="free",
     ),
     MarketProvider(
         "lmstudio", "LM Studio (local)", "local",
@@ -201,6 +241,7 @@ LOCAL_PROVIDERS: list[MarketProvider] = [
         base_url="http://127.0.0.1:1234/v1", api_key_env="",
         default_model="local-model", key_url="https://lmstudio.ai/",
         context_window=32_000, capabilities=dict(FAST),
+        cost="free",
     ),
     MarketProvider(
         "vllm", "vLLM (self-hosted)", "local",
@@ -208,6 +249,7 @@ LOCAL_PROVIDERS: list[MarketProvider] = [
         base_url="http://127.0.0.1:8000/v1", api_key_env="",
         default_model="served-model", key_url="https://docs.vllm.ai/",
         context_window=32_000, capabilities=dict(FAST),
+        cost="free",
     ),
 ]
 
@@ -224,6 +266,7 @@ CLI_PROVIDERS: list[MarketProvider] = [
         key_url="https://claude.ai/login", context_window=200_000,
         capabilities=dict(AGENT_CLI), verified=True,
         roles_preferred=("architect", "implementer", "reviewer", "debugger"),
+        cost="subscription",
     ),
     MarketProvider(
         "codex_cli", "Codex CLI", "cli",
@@ -232,6 +275,7 @@ CLI_PROVIDERS: list[MarketProvider] = [
         key_url="https://platform.openai.com/", context_window=128_000,
         capabilities=dict(AGENT_CLI),
         roles_preferred=("implementer", "tester", "debugger"),
+        cost="subscription",
     ),
     MarketProvider(
         "gemini_cli", "Gemini CLI", "cli",
@@ -240,6 +284,7 @@ CLI_PROVIDERS: list[MarketProvider] = [
         key_url="https://github.com/google-gemini/gemini-cli",
         context_window=1_000_000, capabilities=dict(AGENT_CLI),
         roles_preferred=("researcher", "implementer"),
+        cost="subscription",
     ),
     MarketProvider(
         "opencode_cli", "Open Code", "cli",
@@ -248,6 +293,7 @@ CLI_PROVIDERS: list[MarketProvider] = [
         key_url="https://opencode.ai/", context_window=128_000,
         capabilities=dict(AGENT_CLI),
         roles_preferred=("implementer", "architect", "tester", "debugger"),
+        cost="subscription",
     ),
     MarketProvider(
         "grok_cli", "Grok CLI", "cli",
@@ -255,6 +301,7 @@ CLI_PROVIDERS: list[MarketProvider] = [
         command="grok", default_model="grok (CLI default)",
         key_url="https://x.ai/", context_window=128_000,
         capabilities=dict(AGENT_CLI),
+        cost="subscription",
     ),
     MarketProvider(
         "aider", "Aider", "cli",
@@ -263,6 +310,7 @@ CLI_PROVIDERS: list[MarketProvider] = [
         key_url="https://aider.chat/", context_window=128_000,
         capabilities=dict(AGENT_CLI),
         roles_preferred=("implementer", "debugger"),
+        cost="subscription",
     ),
     MarketProvider(
         "cursor_cli", "Cursor CLI", "cli",
@@ -270,6 +318,7 @@ CLI_PROVIDERS: list[MarketProvider] = [
         command="cursor-agent", default_model="cursor (CLI default)",
         key_url="https://cursor.com/", context_window=128_000,
         capabilities=dict(AGENT_CLI),
+        cost="subscription",
     ),
     MarketProvider(
         "copilot_cli", "GitHub Copilot CLI", "cli",
@@ -277,6 +326,7 @@ CLI_PROVIDERS: list[MarketProvider] = [
         command="copilot", default_model="copilot (CLI default)",
         key_url="https://github.com/features/copilot",
         context_window=128_000, capabilities=dict(AGENT_CLI),
+        cost="subscription",
     ),
     MarketProvider(
         "generic_cli", "Any other CLI agent", "cli",
@@ -337,6 +387,31 @@ def is_ready(provider: MarketProvider, env: Optional[dict] = None) -> bool:
     if provider.kind == "local":
         return local_endpoint_is_up(provider.base_url)
     return bool(provider.api_key_env and environ.get(provider.api_key_env))
+
+
+FREE_COSTS = frozenset({"free", "free_tier"})
+
+COST_LABEL = {
+    "free": "free",
+    "free_tier": "free tier",
+    "subscription": "your plan",
+    "paid": "paid",
+}
+
+
+def is_free(provider: MarketProvider) -> bool:
+    """Usable without per-token charges.
+
+    `subscription` is excluded on purpose. A Claude or Copilot plan has no
+    marginal cost per request, but calling it "free" to someone asking for free
+    models would be answering a different question than the one asked.
+    """
+    return provider.cost in FREE_COSTS
+
+
+def free_model_for(provider: MarketProvider) -> str:
+    """The model to use if the point is to spend nothing."""
+    return provider.free_model or provider.default_model
 
 
 def selectable() -> list[MarketProvider]:
