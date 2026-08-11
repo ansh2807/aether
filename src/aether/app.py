@@ -78,7 +78,11 @@ class AetherApp:
         self.handoffs = HandoffManager(self.repo)
         self.context = ContextManager(self.repo)
         self.checkpoints = CheckpointManager(settings, self.repo)
-        self.verification = VerificationEngine(self.repo, sandbox=self.sandbox)
+        self.verification = VerificationEngine(
+            self.repo,
+            sandbox=self.sandbox,
+            sandbox_mode=settings.security.verification_sandbox,
+        )
         self.workflow = WorkflowEngine()
         self.chat_store = ChatSessionStore(settings.data_dir / "chat_sessions")
         self.chat_router = ChatRouter(

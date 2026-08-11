@@ -54,6 +54,11 @@ class OrchestratorSettings(BaseModel):
     prefer_llm_session_summary: bool = True
     chat_max_failovers: int = 4
     default_chat_provider: Optional[str] = None
+    # Ask a model to plan the subtask DAG. Falls back to the deterministic
+    # keyword planner when no provider is available or the plan fails schema
+    # validation - the orchestrator still owns execution either way.
+    use_llm_planner: bool = True
+    planner_max_subtasks: int = 8
 
 
 class BudgetSettings(BaseModel):
@@ -81,6 +86,11 @@ class SecuritySettings(BaseModel):
     command_allowlist_prefixes: list[str] = Field(default_factory=list)
     max_subprocess_output_bytes: int = 2_000_000
     workspace_only: bool = True
+    # How to run verification commands over agent-written code:
+    #   subprocess - scrubbed environment, no inherited secrets (default)
+    #   container  - docker/podman, no network, resource capped
+    #   off        - inherit everything; only for a workspace you trust
+    verification_sandbox: str = "subprocess"
 
 
 class LoggingSettings(BaseModel):

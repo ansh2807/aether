@@ -118,8 +118,17 @@ class MockAdapter(BaseAdapter):
                 ws = Path(request.workspace_path)
                 ws.mkdir(parents=True, exist_ok=True)
                 note = ws / "AGENT_NOTES.md"
+                # The mock stands in for a *competent* agent, so its output has
+                # to clear the same verification bar a real one would — research
+                # checks require citations. The source is obviously fake on
+                # purpose: this is a stand-in, and it should read like one.
                 note.write_text(
-                    f"# Agent notes ({self.provider_id})\n\nRole: {role}\n\nAssignment: {assignment}\n",
+                    f"# Agent notes ({self.provider_id})\n\n"
+                    f"Role: {role}\n\n"
+                    f"Assignment: {assignment}\n\n"
+                    "## References\n"
+                    "- https://example.invalid/mock-source (placeholder: the mock "
+                    "agent does not perform real research)\n",
                     encoding="utf-8",
                 )
                 artifacts.append(str(note))
