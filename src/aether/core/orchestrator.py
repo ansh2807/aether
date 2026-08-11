@@ -43,6 +43,7 @@ from aether.domain.models import (
     TaskMemory,
 )
 from aether.execution_log import ExecutionLog
+from aether.interfaces.adapters import AgentAdapter
 from aether.observability.logging import get_logger
 from aether.storage.repository import FileAuditLogger, SqliteRepository
 
@@ -363,6 +364,24 @@ class Orchestrator:
                 if current is not None and current.status in _RESUMABLE_STATUSES:
                     await self.start_task(task_id)
 
+    def _select_planning_adapter(self) -> Optional[AgentAdapter]:
+        """Pick a provider to draft the subtask DAG.
+
+        Mirrors ``AgentRouter._has_real_provider``'s definition of "a real
+        provider": the first enabled, non-testing, registered adapter.
+        Planning is a single call with a hard schema gate on the result, so
+        full routing (capability scoring, health probes) is unnecessary here
+        — any real adapter can attempt it, and a bad answer is rejected by
+        validation rather than by picking the "best" provider.
+        """
+        for pid in self.registry.list_ids():
+            cfg = self.registry.get_config(pid)
+            if cfg is not None and cfg.enabled and not cfg.for_testing:
+                adapter = self.registry.get(pid)
+                if adapter is not None:
+                    return adapter
+        return None
+
     async def _execute_lifecycle(self, task_id: str) -> None:
         task = await self.tasks.get(task_id)
         assert task is not None
@@ -380,8 +399,20 @@ class Orchestrator:
                     task = await self.tasks.transition(task, TaskStatus.PLANNING)
 
         if not task.subtasks:
-            task.subtasks = self.workflow.plan(task)
-            memory.current_state = f"Planned {len(task.subtasks)} subtasks (mode={task.mode.value})"
+            plan_adapter = self._select_planning_adapter()
+            plan_result = await self.workflow.plan_task(task, plan_adapter, self.settings)
+            task.subtasks = plan_result.subtasks
+            task.metadata["planner_source"] = plan_result.source
+            if plan_result.source != "llm":
+                # A fallback must always be discoverable, never silent — record
+                # why on both the task itself and the timeline.
+                task.metadata["planner_fallback_reason"] = plan_result.reason
+                await self.tasks.timeline(
+                    task_id, "orchestrator", "planner_fallback", plan_result.reason or "unknown"
+                )
+            memory.current_state = (
+                f"Planned {len(task.subtasks)} subtasks (mode={task.mode.value}, planner={plan_result.source})"
+            )
             memory.next_action = task.subtasks[0].title if task.subtasks else "complete"
             await self.repo.save_memory(memory)
             await self.tasks.save(task)
@@ -389,7 +420,8 @@ class Orchestrator:
                 task_id,
                 "orchestrator",
                 "planned",
-                f"{len(task.subtasks)} subtasks: " + ", ".join(s.title for s in task.subtasks),
+                f"{len(task.subtasks)} subtasks ({plan_result.source}): "
+                + ", ".join(s.title for s in task.subtasks),
             )
             await self._msg(
                 task_id,

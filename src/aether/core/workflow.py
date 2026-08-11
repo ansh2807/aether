@@ -2,12 +2,26 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Optional
+
 from aether.domain.enums import AgentRole, SubtaskStatus, TaskMode
 from aether.domain.models import Subtask, Task
 
+if TYPE_CHECKING:
+    from aether.config.settings import AetherSettings
+    from aether.core.planner import PlanResult
+    from aether.interfaces.adapters import AgentAdapter
+
 
 class WorkflowEngine:
-    """Deterministic planner — orchestrator-owned, not agent-owned."""
+    """Deterministic planner — orchestrator-owned, not agent-owned.
+
+    ``plan()`` stays synchronous and keyword-based — it is also used for the
+    CLI's plan preview, which has no model call available. ``plan_task()`` is
+    the async path (WO-11): it asks a model for a richer subtask DAG via
+    ``LLMPlanner`` and falls back to this same keyword planner, unvalidated
+    plans never surviving contact with the orchestrator.
+    """
 
     def plan(self, task: Task) -> list[Subtask]:
         if task.mode == TaskMode.DEBATE:
@@ -17,6 +31,30 @@ class WorkflowEngine:
         if task.mode == TaskMode.PARALLEL:
             return self._plan_parallel(task)
         return self._plan_solo(task)
+
+    async def plan_task(
+        self,
+        task: Task,
+        adapter: Optional["AgentAdapter"],
+        settings: "AetherSettings",
+    ) -> "PlanResult":
+        """Async planning path: LLM planner with the keyword planner as fallback.
+
+        ``adapter`` is the provider chosen to do the planning (or ``None`` when
+        no real provider is available — the keyword planner is used
+        immediately in that case). Only non-DEBATE/COLLAB/PARALLEL modes are
+        eligible for LLM planning; those modes have fixed, deliberately
+        structured shapes and keep using the deterministic planner.
+        """
+        from aether.core.planner import LLMPlanner
+
+        if task.mode != TaskMode.SOLO:
+            from aether.core.planner import PlanResult
+
+            return PlanResult(self.plan(task), source="keyword", reason=f"mode={task.mode.value} is not LLM-planned")
+
+        planner = LLMPlanner(settings)
+        return await planner.plan_task(task, adapter, self.plan)
 
     def _plan_solo(self, task: Task) -> list[Subtask]:
         prompt = task.original_prompt.lower()
