@@ -389,3 +389,69 @@ async def test_the_load_term_is_recorded_in_the_decision(tmp_path):
             pytest.fail("never re-selected the busy provider; cannot check its reasons")
     finally:
         await app.stop()
+
+
+# --- routing decisions must be explicable after the fact -----------------
+
+
+@pytest.mark.asyncio
+async def test_the_timeline_records_why_a_provider_was_chosen(tmp_path):
+    """`reasons` was computed on every selection and then thrown away.
+
+    The `assigned` event said what was picked and never why, so "why did it use
+    that provider, and what else was available?" was unanswerable after a run —
+    including for the load term added in WO-24, whose changelog entry claimed
+    routing stayed auditable when only tests could see it.
+    """
+    from aether.domain.enums import TaskMode
+
+    app = await _three_equal_providers(tmp_path)
+    try:
+        task = await app.orchestrator.submit("Build a thing", mode=TaskMode.SOLO,
+                                             auto_start=False)
+        await app.orchestrator.start_task(task.task_id)
+
+        assigned = []
+        for _ in range(300):
+            events = await app.repo.list_events(task.task_id)
+            assigned = [e for e in events if e.action == "assigned"]
+            if assigned:
+                break
+            await asyncio.sleep(0.1)
+
+        assert assigned, "no assignment was ever recorded"
+        detail = assigned[0].detail
+        assert "score=" in detail, f"no score in {detail!r}"
+        assert "capability:" in detail, f"no scoring factors in {detail!r}"
+        assert "role=" in detail, "the pre-existing detail was lost"
+
+        await app.orchestrator.cancel_task(task.task_id)
+    finally:
+        await app.stop()
+
+
+@pytest.mark.asyncio
+async def test_the_rejected_alternatives_are_recorded(tmp_path):
+    """"Why not the other one" needs the other ones written down."""
+    from aether.domain.enums import TaskMode
+
+    app = await _three_equal_providers(tmp_path)
+    try:
+        task = await app.orchestrator.submit("Build a thing", mode=TaskMode.SOLO,
+                                             auto_start=False)
+        await app.orchestrator.start_task(task.task_id)
+
+        for _ in range(300):
+            events = await app.repo.list_events(task.task_id)
+            assigned = [e for e in events if e.action == "assigned"]
+            if assigned:
+                break
+            await asyncio.sleep(0.1)
+
+        assert assigned
+        assert " over " in assigned[0].detail, (
+            f"the candidates that lost are not recorded: {assigned[0].detail!r}"
+        )
+        await app.orchestrator.cancel_task(task.task_id)
+    finally:
+        await app.stop()

@@ -6,6 +6,23 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Hardening pass over the orchestrator, control-plane state, local API and CLI.
 
+### Fixed — routing decisions were unexplainable after the fact
+
+- **The router's rationale was computed and thrown away.** `RouteDecision`
+  carried `score`, `reasons` and `alternatives`; the `assigned` timeline event
+  recorded only "subtask → provider (role=X)". Nothing outside the tests ever
+  read the rest, so "why that provider, and what else was available?" could not
+  be answered after a run. Exactly the dead-computation pattern WO-03 called
+  out: it implies a guarantee it does not provide.
+- Found by re-checking a claim rather than trusting it. The WO-24 entry above
+  asserted routing stayed auditable because the load term was added to
+  `reasons` — into a field with no production reader. The claim is struck
+  through above rather than quietly deleted.
+- The timeline now reads:
+  `Plan approach → mock_a (role=architect) score=0.80 [capability:architecture=9, availability=AVAILABLE] over mock_b, mock_c`,
+  and the WebSocket `agent_assigned` event carries score, reasons and
+  alternatives for the dashboard.
+
 ### Fixed — Open Code lost in-flight output too (WO-02 complete)
 
 - **The last adapter still calling `proc.communicate()` now streams.** It
@@ -71,7 +88,9 @@ Hardening pass over the orchestrator, control-plane state, local API and CLI.
   router now keeps a per-provider in-flight count and applies a bounded load
   penalty. A single subtask still picks the best provider — asserted, so spread
   was not traded for quality.
-- The load term appears in the decision's `reasons`, keeping routing auditable.
+- ~~The load term appears in the decision's `reasons`, keeping routing
+  auditable.~~ **This was wrong when written** — see below. `reasons` was
+  computed on every selection and read by nothing outside the tests.
 - Scope, stated plainly: breaker state is in-memory and never persisted, so
   `DISABLED` lasts for the life of the process and a restart clears it. The
   planned `aether providers reset <id>` was **dropped** — a separate CLI process

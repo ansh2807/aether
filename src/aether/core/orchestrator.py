@@ -671,18 +671,28 @@ class Orchestrator:
                 s.assigned_agent = provider_id
 
             await apply(_assign)
-            await self.tasks.timeline(
-                task_id,
-                "orchestrator",
-                "assigned",
-                f"{sub.title} → {provider_id} (role={sub.role.value})",
+            # Record *why*, not just what. The router already scores every
+            # candidate and keeps its rationale, and all of it used to be
+            # discarded here — leaving "assigned to X" with no way to answer
+            # "why not Y?" after the fact. An orchestrator whose whole claim is
+            # that it, not the model, decides should be able to show its work.
+            rationale = ", ".join(decision.reasons[:6]) if decision.reasons else "no factors recorded"
+            detail = (
+                f"{sub.title} → {provider_id} (role={sub.role.value}) "
+                f"score={decision.score:.2f} [{rationale}]"
             )
+            if decision.alternatives:
+                detail += f" over {', '.join(decision.alternatives[:3])}"
+            await self.tasks.timeline(task_id, "orchestrator", "assigned", detail)
             await self._emit(
                 {
                     "type": "agent_assigned",
                     "task_id": task_id,
                     "provider": provider_id,
                     "subtask": sub.title,
+                    "score": round(decision.score, 4),
+                    "reasons": decision.reasons,
+                    "alternatives": decision.alternatives,
                 }
             )
 
