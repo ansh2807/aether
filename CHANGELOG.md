@@ -6,6 +6,34 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Hardening pass over the orchestrator, control-plane state, local API and CLI.
 
+### Fixed — Open Code lost in-flight output too (WO-02 complete)
+
+- **The last adapter still calling `proc.communicate()` now streams.** It
+  returned nothing until the child exited, so a kill at minute nine of a
+  ten-minute run threw away all nine. Reuses the same `stream_process` helper
+  the CLI adapter has used since WO-02; Open Code attaches stdin as a real file
+  rather than a pipe, so there is nothing to feed concurrently.
+- A timeout now leaves the partial output on disk instead of discarding it —
+  a hung agent is the common case and the one where salvage pays off.
+- Only stdout is mirrored. Open Code writes progress chatter to stderr, and
+  folding it in would corrupt a handoff parsed from a salvaged run.
+- `docs/DURABILITY.md`: this row moves to ✅, with the one remaining condition
+  stated in the cell — API providers need SSE, and fall back to a buffered
+  request where the server cannot stream.
+
+### Fixed — tests
+
+- **A test in this batch drove the real `opencode` CLI.** The adapter resolves
+  its binary with `shutil.which("opencode")` and ignores `config.command`, so
+  pointing the config at a script did nothing and six tests made live calls
+  against the logged-in account. Now a wrapper binary on disk plus a patched
+  `opencode_bin`. Tests must never reach a real provider.
+- Those two streaming tests took 60s: the wrapper leaves a grandchild holding
+  the pipe after the kill, so the child's own sleep set the pace. Shortened to
+  5s — 11s now, and reverting the fix still fails them.
+- `_FakeProc` in the WO-06 tests grew `stdout`/`stderr` readers. It only
+  implemented `communicate()`, which no longer exists on this path.
+
 ### Fixed — API providers lost in-flight output when killed
 
 - **The API adapter now streams and mirrors to disk as output arrives.** It

@@ -157,9 +157,30 @@ def test_health_cache_ttl_is_a_module_level_constant():
 # --- #3 Open Code: long prompts go via stdin/temp file, not argv -----------
 
 
+class _FakeStream:
+    """Minimal asyncio.StreamReader stand-in: yields its payload once, then EOF."""
+
+    def __init__(self, payload: bytes = b"") -> None:
+        self._payload = payload
+
+    async def read(self, _n: int = -1) -> bytes:
+        data, self._payload = self._payload, b""
+        return data
+
+
 class _FakeProc:
+    """The adapter reads pipes incrementally now, not via communicate().
+
+    These tests only care about argv, but the fake still has to look like a
+    real process to `stream_process` — `.stdout`/`.stderr` readers and a `.wait`.
+    `stdin` is None because Open Code attaches a real file, never a pipe.
+    """
+
     def __init__(self) -> None:
         self.returncode: Optional[int] = 0
+        self.stdout = _FakeStream(b"STATUS: COMPLETE\n\nCOMPLETED:\n- ok\n")
+        self.stderr = _FakeStream(b"")
+        self.stdin = None
 
     async def communicate(self):
         return b"STATUS: COMPLETE\n\nCOMPLETED:\n- ok\n", b""

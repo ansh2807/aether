@@ -22,7 +22,7 @@ pytest tests/test_durability.py tests/test_retry.py tests/test_export_resume.py 
 | Transient network blip | ✅ | retried on the same provider with full-jitter backoff *before* any failover; the circuit breaker sees one failure, not one per try | `test_two_network_failures_then_success_same_provider`, `test_timeout_is_retried_like_network`, `test_retries_exhausted_makes_exactly_retries_plus_one_attempts` |
 | A failure retrying cannot fix | ✅ | `AUTH`, `QUOTA`, `POLICY_DENIED`, `CONTEXT`, `CANCELLED` fail over immediately instead of burning attempts | `test_auth_failure_returns_immediately_zero_retries`, `test_permanent_failure_classes_are_never_retried` |
 | **Orchestrator is SIGKILLed mid-subtask** | ✅ | a fresh orchestrator over the same data dir requeues and finishes the task; no subtask runs twice; nothing is left stranded | `test_task_survives_sigkill_mid_subtask` (3 kill offsets), `test_recovery_is_recorded_not_silent` |
-| **Agent output in flight when killed** | ⚠️ mostly | CLI **and API** adapter output is mirrored to disk as it arrives and salvaged into a `PARTIAL` handoff on the next attempt. API providers stream over SSE to achieve this, falling back to a buffered request only where the server cannot stream — **Open Code still buffers** (see below) | `test_cli_adapter_writes_output_as_it_arrives`, `test_output_reaches_disk_before_the_response_completes`, `test_partial_output_survives_an_abandoned_stream`, `test_orchestrator_salvages_an_interrupted_run` |
+| **Agent output in flight when killed** | ✅ * | **Every adapter** now mirrors output to disk as it arrives and salvages it into a `PARTIAL` handoff on the next attempt. *The one condition: API providers achieve this over SSE and fall back to a buffered request where the server cannot stream, and on that path there is nothing to salvage (see below) | `test_cli_adapter_writes_output_as_it_arrives`, `test_output_reaches_disk_before_the_response_completes`, `test_output_is_on_disk_before_the_process_finishes`, `test_a_timeout_still_leaves_the_partial_output`, `test_orchestrator_salvages_an_interrupted_run` |
 | Subtask stranded `RUNNING` by a dead runner | ✅ | reclaimed to `READY` rather than spinning the lifecycle forever | `test_stranded_running_subtask_is_reclaimed` |
 | A DAG that can never progress | ✅ | fails loudly with `Deadlocked; no runnable subtasks remain: [...]` instead of hanging | `test_unsatisfiable_dependency_fails_instead_of_hanging` |
 | Long task outgrows the context window | ✅ | the package is budgeted against the *target provider's* window and compacted; assignment, goal and next action are never dropped | `test_package_fits_a_small_window`, `test_what_survives_compaction_is_what_the_agent_needs`, `test_long_task_runs_to_completion_without_a_context_failure` |
@@ -46,12 +46,12 @@ can still lose work.
 
 ### In-flight output from API and Open Code providers
 
-`CliAgentAdapter` and `ApiAgentAdapter` both mirror output to the execution log
-as it arrives. `OpencodeCliAdapter` still buffers its whole response in memory,
-so killing the process mid-request loses everything received so far from that
-one provider.
+All three adapters — `CliAgentAdapter`, `ApiAgentAdapter` and
+`OpencodeCliAdapter` — now mirror output to the execution log as it arrives.
+Open Code was the last holdout, using `proc.communicate()`, which returns
+nothing until the child exits.
 
-Two limits worth stating plainly rather than leaving to be discovered:
+Two limits remain, worth stating plainly rather than leaving to be discovered:
 
 - **API capture depends on the server supporting SSE.** The adapter requests a
   stream and falls back to a buffered POST when the endpoint rejects it
@@ -61,9 +61,12 @@ Two limits worth stating plainly rather than leaving to be discovered:
 - **Salvage needs a workspace to write into.** Calls without one — health
   checks, ad-hoc execution — take the buffered path by design.
 
+Only stdout is mirrored. Open Code writes progress chatter to stderr, and
+folding that in would corrupt a handoff parsed out of a salvaged run
+(`test_stderr_is_not_mixed_into_the_salvage_log`).
+
 The salvage machinery itself is provider-agnostic: it reads whatever is on disk.
-Wiring Open Code is the last piece, tracked as the deferred half of WO-02 in
-[`ROADMAP.md`](ROADMAP.md).
+WO-02 is now complete.
 
 ### Machine reboot is inferred, not directly tested
 

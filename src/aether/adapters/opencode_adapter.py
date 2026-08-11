@@ -15,7 +15,9 @@ from pathlib import Path
 from typing import Optional
 
 from aether.adapters.base import BaseAdapter
+from aether.adapters.streaming import stream_process
 from aether.domain.enums import FailureClass, ProviderAvailability
+from aether.execution_log import ExecutionLog
 from aether.domain.models import (
     AuthStatus,
     ExecutionRequest,
@@ -245,9 +247,15 @@ class OpencodeCliAdapter(BaseAdapter):
             )
             self._procs[request.execution_id] = proc
             self._active[request.execution_id] = True
+            # Mirror stdout to disk as it arrives. communicate() returns
+            # nothing until the child exits, so a kill at minute nine of a
+            # ten-minute run threw away all of it — the last adapter that
+            # still did. stdin is a real file here, not a pipe, so there is
+            # nothing to feed concurrently.
+            exec_log = ExecutionLog.for_request(request.workspace_path, request.subtask_id)
             try:
                 stdout_b, stderr_b = await asyncio.wait_for(
-                    proc.communicate(),
+                    stream_process(proc, None, self.max_output_bytes, exec_log),
                     timeout=request.timeout_seconds,
                 )
             except asyncio.TimeoutError:
