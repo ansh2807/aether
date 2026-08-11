@@ -1,0 +1,66 @@
+name: Feature request
+description: Suggest something AETHER should do
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        If you want a new model provider, you may not need an issue at all —
+        most are configuration, not code. See the "Adding a provider" section
+        of [CONTRIBUTING.md](../blob/main/CONTRIBUTING.md), and run
+        `aether models` to check it is not already there.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: >
+        The situation you hit, not the solution you have in mind. A concrete
+        story beats a feature name.
+      placeholder: >
+        When a provider rate-limits mid-subtask I can see the failover in the
+        timeline, but I cannot tell how much of the original work was salvaged.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like it to do?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which part of AETHER?
+      options:
+        - Orchestrator (task lifecycle, planning, handoffs)
+        - Routing and failover
+        - Verification
+        - Durability and recovery
+        - Providers and adapters
+        - CLI / interactive terminal
+        - API and dashboard
+        - Docs
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What did you try instead?
+      description: "Including 'nothing, I did not know where to start' — that is a docs bug worth knowing about."
+
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Does this need the orchestrator to change?
+      description: >
+        Not a trick question, and "yes" is a fine answer. It just tells us
+        whether this is a config-shaped change or a design discussion.
+      options:
+        - label: I think this is config or an adapter only
+        - label: I think this changes orchestrator behaviour
+        - label: Not sure

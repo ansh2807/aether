@@ -1,0 +1,79 @@
+name: Bug report
+description: Something behaved incorrectly
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing, `aether doctor` answers most environment questions —
+        paste its output below and it will save a round trip.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, what you got instead.
+      placeholder: |
+        I ran `aether run "..."` and the task reached COMPLETED, but no files
+        were written to the workspace.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: >
+        A sequence that reliably reproduces it. If it only happens
+        intermittently, say so and roughly how often — that is useful
+        information, not a disqualification.
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Does this lose or falsify work?
+      description: >
+        Durability bugs are the highest priority here. A task marked complete
+        when it is not is worse than a crash.
+      options:
+        - "No — wrong output or bad UX, nothing lost"
+        - "Yes — a task was lost or stuck"
+        - "Yes — a task was marked complete but the work was not done"
+        - "Yes — work was silently duplicated or overwritten"
+        - "Not sure"
+    validations:
+      required: true
+
+  - type: input
+    id: task-id
+    attributes:
+      label: Task ID
+      description: "If a task was involved. `aether task trace TASK-...` output is even better."
+      placeholder: TASK-20260810-13004
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: "`aether doctor` output"
+      render: text
+
+  - type: input
+    id: version
+    attributes:
+      label: AETHER version and OS
+      placeholder: "0.1.0, Windows 11 / Python 3.11"
+    validations:
+      required: true
+
+  - type: textarea
+    id: providers
+    attributes:
+      label: Providers involved
+      description: "Which were enabled? `aether models --ready` if it helps."
+      placeholder: "claude_cli and deepseek enabled; the failover happened between them."

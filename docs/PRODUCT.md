@@ -2,9 +2,29 @@
 
 ## What AETHER is
 
-**AETHER is an LLM router that works like an AI agent terminal** (Grok / Claude Code style).
+AETHER has **two surfaces over one control plane**, and this document covers the
+first of them:
+
+- **The terminal** — an LLM router that behaves like an AI agent terminal
+  (Grok / Claude Code style). Chat, debate, session memory, automatic model
+  switching. That is the subject of everything below.
+- **The orchestrator** — `aether run "goal"` plans a subtask DAG and gates it on
+  verification. See the [README](../README.md) and
+  [DURABILITY.md](DURABILITY.md).
+
+They are not competing products. The terminal is the interactive way in; the
+orchestrator is what runs when a goal is bigger than a conversation. Both sit on
+the same routing, failover, persistence and budgeting machinery — which is why
+switching a model mid-conversation and switching an agent mid-subtask are the
+same code path.
 
 It is **not** primarily a website research tool (WIOS can be added later as a module).
+
+> **On "AETHER is not a chatbot."** Earlier drafts of the README said that while
+> this document described a chat terminal. The README was overstating a real
+> point. AETHER *does* have a chat surface; what it does not do is let the model
+> own the session. Routing, failover, compaction, persistence and verification
+> are decided by the orchestrator, not by whatever model happens to be answering.
 
 ### Core loop
 

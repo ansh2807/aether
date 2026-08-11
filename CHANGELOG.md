@@ -6,6 +6,40 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Hardening pass over the orchestrator, control-plane state, local API and CLI.
 
+### Added — contributor on-ramp and a runnable demo
+
+- **`CONTRIBUTING.md`**, issue templates (bug / feature / config) and a PR
+  template. The norm they lead with is *a test must be able to fail*: break your
+  own fix on purpose and watch the new test go red. The PR template asks you to
+  tick that you did, and to say so honestly if you did not.
+- **`scripts/demo_failover.py`** — kills a task mid-flight and resumes it in a
+  fresh process, no API keys required. It waits for a genuinely mid-flight
+  moment (some subtasks done, some not) and **refuses to print `PASS` if it
+  cannot catch one**, because the first version killed a task that had already
+  finished and reported success having demonstrated nothing.
+- The demo reports honestly that recovery may land on the *same* provider it
+  died on. Routing scores capability, health and quota, and a killed process is
+  not evidence against a provider; two are configured so it *can* move, not to
+  promise it will.
+
+### Changed — docs
+
+- **README and `docs/PRODUCT.md` no longer contradict each other.** The README
+  claimed AETHER is "not a chatbot" while PRODUCT.md described a chat terminal.
+  Both now describe two surfaces over one control plane: the interactive
+  terminal and the orchestrator. The accurate claim was always narrower — the
+  model is never the thing in charge.
+- Stale test-count badge corrected (176 → 223).
+
+### Fixed — tests
+
+- `test_orchestrator_call_site_falls_back_when_no_real_provider` polled just 5s
+  for planning to complete and went flaky under a loaded full-suite run on
+  Windows. Raised to 30s with a diagnostic message.
+- Removed an `importlib.reload` from the catalogue tests. Reloading rebinds
+  `session.PROVIDER_CATALOG` to a fresh list while every `from … import` holds
+  the old one — a state no real run can reach, leaked into every later test.
+
 ### Added — provider catalogue
 
 - **`aether models` / `/models`** — lists every provider AETHER can connect to,

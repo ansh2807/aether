@@ -10,7 +10,7 @@ verification. Models are pluggable adapters — not the thing in charge.
 [![CI](https://github.com/ansh2807/aether/actions/workflows/ci.yml/badge.svg)](https://github.com/ansh2807/aether/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache--2.0-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-176-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-223-brightgreen.svg)](tests/)
 
 </div>
 
@@ -46,8 +46,17 @@ routing and failover between agents instead of one mock.
 
 ## What it is
 
-AETHER is **not** a chatbot and **not** a free-form room where models talk to each
-other. A deterministic central Orchestrator owns:
+**Two surfaces over one control plane.**
+
+| Surface | Command | What it does |
+| --- | --- | --- |
+| **Terminal** | `aether` | Chat with an active model. When it rate-limits, crashes, loses auth or runs out of context, AETHER switches models and carries the conversation across — you keep typing. `/debate` puts several models in structured rounds. |
+| **Orchestrator** | `aether run "goal"` | Plans a goal into a subtask DAG, assigns each to a suitable agent, and gates completion on verification. |
+
+The terminal is a chat surface, so "AETHER is not a chatbot" would be false.
+The accurate claim is narrower and more useful: **the model is never the thing
+in charge.** Both surfaces run on the same deterministic control plane, which
+owns:
 
 | | |
 |---|---|
@@ -58,9 +67,15 @@ other. A deterministic central Orchestrator owns:
 | **Verification** | a mandatory gate before `COMPLETED`; "the agent said done" is not evidence |
 | **Guardrails** | per-task budgets, per-provider circuit breakers and quotas, an append-only audit log |
 
-Providers (OpenAI, Claude CLI, Codex CLI, Gemini, Grok, Open Code, …) plug in
-behind one `AgentAdapter` interface. Adding one is an adapter + capability
-scores + config — no orchestrator changes.
+What it is *not* is a free-form room where models talk to each other and
+something useful is hoped for. Even `/debate` runs in structured rounds with a
+consensus step, and no agent can mark work complete on its own say-so.
+
+Providers plug in behind one `AgentAdapter` interface — around thirty ship in
+the config across agent CLIs, hosted APIs, aggregators and local runtimes (see
+[`aether models`](#finding-a-provider--aether-models)). Adding one is usually
+config alone; a genuinely new protocol is an adapter plus capability scores,
+with no orchestrator changes.
 
 ### Design rules it actually holds to
 
@@ -109,6 +124,27 @@ flowchart TB
 
 **What survives what:** [`docs/DURABILITY.md`](docs/DURABILITY.md) — every
 guarantee cites the test that proves it, and the gaps are listed just as plainly.
+
+**Watch it happen**, no keys required — kills a task mid-flight and resumes it
+in a new process:
+
+```bash
+python scripts/demo_failover.py
+```
+
+```text
+[2/4] SIGKILL to pid 28832 — no cleanup, no flush, no finally.
+[3/4] reading the database left behind:
+      status=RUNNING  subtasks=1/3   unfinished subtasks stranded by the kill: 2
+[4/4] fresh process over the same data dir; startup requeues it...
+
+  before kill : status=RUNNING    subtasks=1/3
+  after resume: status=COMPLETED  subtasks=3/3
+  PASS — the task outlived the process that started it.
+```
+
+The script refuses to print `PASS` if it cannot catch the task mid-flight, so
+it cannot succeed vacuously.
 
 Full design: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) ·
 Failure matrix: [`docs/FAILURE_SCENARIOS.md`](docs/FAILURE_SCENARIOS.md) ·
@@ -547,6 +583,16 @@ open issues that are known and not yet fixed.
 Where the project is going: [`docs/ROADMAP.md`](docs/ROADMAP.md) — the whole
 plan in one file. One bet (*never losing work*), an honest gap table, and 22
 work orders with acceptance criteria.
+
+---
+
+## Contributing
+
+[`CONTRIBUTING.md`](CONTRIBUTING.md). No API keys needed to develop or to run
+the tests. One norm is worth stating up front: **a test must be able to fail** —
+break your own fix on purpose and watch the new test go red before submitting.
+
+Adding a provider is usually configuration, not code.
 
 ---
 

@@ -111,18 +111,24 @@ def test_login_wizard_stays_short():
 
 
 def test_extension_is_idempotent():
-    """session.py extends a module-level list; a re-import must not duplicate it."""
-    import importlib
+    """session.py extends a module-level list in place; running it twice must
+    not duplicate entries.
 
+    Deliberately does not `importlib.reload` the module to test this: reloading
+    rebinds `session.PROVIDER_CATALOG` to a fresh list while every module that
+    did `from ... import PROVIDER_CATALOG` keeps the old one, leaving the
+    process in a state no real run can reach — and leaking that divergence into
+    every test that follows.
+    """
     from aether.config import session as session_mod
 
     before = len(PROVIDER_CATALOG)
     session_mod._extend_catalog()
+    session_mod._extend_catalog()
     assert len(PROVIDER_CATALOG) == before, "extending twice duplicated entries"
 
-    importlib.reload(session_mod)
-    ids = [c["id"] for c in session_mod.PROVIDER_CATALOG]
-    assert len(ids) == len(set(ids)), "reload produced duplicate catalogue ids"
+    ids = [c["id"] for c in PROVIDER_CATALOG]
+    assert len(ids) == len(set(ids)), "duplicate catalogue ids"
 
 
 # --- the readiness column ------------------------------------------------

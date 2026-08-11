@@ -1,0 +1,19 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Durability question — what survives what?
+    url: https://github.com/ansh2807/aether/blob/main/docs/DURABILITY.md
+    about: >
+      Every guarantee cites the test that proves it, and there is an explicit
+      list of things that are NOT guaranteed. Check there before filing.
+
+  - name: Adding a model provider
+    url: https://github.com/ansh2807/aether/blob/main/CONTRIBUTING.md
+    about: >
+      Usually configuration rather than code. Run `aether models` first — around
+      thirty providers already ship, disabled by default.
+
+  - name: Security vulnerability
+    url: https://github.com/ansh2807/aether/security/advisories/new
+    about: >
+      Please report privately, not as a public issue. Verification runs
+      agent-written code, so sandbox escapes are especially worth reporting.

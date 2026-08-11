@@ -249,14 +249,22 @@ async def test_orchestrator_call_site_falls_back_when_no_real_provider(app: Aeth
     task = await app.orchestrator.submit(REFACTOR_PROMPT, mode=TaskMode.SOLO, auto_start=False)
     await app.orchestrator.start_task(task.task_id)
 
+    # 30s, not 5s: planning is async and this polled just long enough to be
+    # flaky under a loaded full-suite run on Windows. A generous ceiling costs
+    # nothing on the passing path and stops the suite crying wolf.
     planned = None
-    for _ in range(100):
+    last = None
+    for _ in range(600):
         t = await app.tasks.get(task.task_id)
         if t and t.subtasks:
             planned = t
             break
+        last = t
         await asyncio.sleep(0.05)
-    assert planned is not None, "task was never planned"
+    assert planned is not None, (
+        "task was never planned within 30s; last seen status="
+        f"{getattr(last, 'status', None)}"
+    )
 
     assert planned.metadata.get("planner_source") == "keyword"
     assert planned.metadata.get("planner_fallback_reason")
