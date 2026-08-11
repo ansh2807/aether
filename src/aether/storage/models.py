@@ -1,4 +1,13 @@
-"""SQLAlchemy ORM tables."""
+"""SQLAlchemy ORM tables.
+
+Column types here are deliberately boring and portable: `String`, `Text`,
+`Integer`, `Float`, `DateTime(timezone=True)`. No SQLite-only or
+Postgres-only types, no JSON column type (payloads are serialized to `Text`
+as JSON strings by the repository layer — that's a schema choice, not a
+SQLite limitation, and it stays as-is here; see storage/repository.py). This
+DDL creates cleanly on both `sqlite+aiosqlite://` and `postgresql+asyncpg://`
+via `Database.create_all()`.
+"""
 
 from __future__ import annotations
 

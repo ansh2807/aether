@@ -1,4 +1,12 @@
-"""SQLite-backed repositories implementing store interfaces."""
+"""SQLAlchemy-backed repositories implementing store interfaces.
+
+Despite the class name below (kept for import compatibility — `AetherApp`
+constructs it directly), nothing in this module is SQLite-specific: every
+query goes through the async SQLAlchemy ORM/Core API (`session.get`,
+`select(...)`, `session.add`), so it runs unchanged against whatever engine
+`storage/db.py`'s `Database` was built with, SQLite or Postgres. See
+`tests/test_postgres.py` for the Postgres-backed exercise of this class.
+"""
 
 from __future__ import annotations
 
