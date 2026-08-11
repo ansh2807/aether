@@ -98,3 +98,44 @@ jobs:
       - run: npm ci
       - run: npx tsc --noEmit
       - run: npm run build
+
+  docker:
+    name: docker image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: aether:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Building proves it compiles; this proves it runs. An image that starts
+      # and then 500s on the first request is not a passing build.
+      - name: Boot it and hit the API
+        run: |
+          docker run -d --name aether-ci -p 7420:7420 aether:ci
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:7420/api/health; then echo; break; fi
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:7420/api/health | grep -q '"status":"ok"'
+
+      - name: The API must not be open without a token
+        run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:7420/api/status)
+          test "$code" = "401" || { echo "unauthenticated /api/status returned $code"; exit 1; }
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+            -H 'Content-Type: application/json' \
+            -d '{"model":"auto","messages":[{"role":"user","content":"hi"}]}' \
+            http://127.0.0.1:7420/v1/chat/completions)
+          test "$code" = "401" || { echo "unauthenticated /v1 returned $code — open relay"; exit 1; }
+
+      - name: Logs on failure
+        if: failure()
+        run: docker logs aether-ci || true

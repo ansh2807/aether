@@ -18,6 +18,7 @@ from aether.api.auth import check_request, check_websocket, load_or_create_token
 from aether.app import AetherApp
 from aether.core.doctor import run_doctor
 from aether.domain.enums import ApprovalLevel, TaskMode, TaskStatus
+from aether.domain.models import utcnow
 
 
 class TaskCreateBody(BaseModel):
@@ -52,6 +53,26 @@ class ConnectBody(BaseModel):
 
 class ApiKeyBody(BaseModel):
     api_key: str = Field(..., min_length=1)
+
+
+class OpenAIMessage(BaseModel):
+    role: str
+    content: Any = ""
+
+
+class OpenAIChatRequest(BaseModel):
+    """The subset of the OpenAI chat-completions request AETHER acts on.
+
+    Extra fields are accepted and ignored rather than rejected: real clients
+    send temperature, top_p, tool definitions and vendor extensions, and a 422
+    on an unknown key would make AETHER useless as a drop-in endpoint.
+    """
+
+    model_config = {"extra": "allow"}
+
+    model: str = "auto"
+    messages: list[OpenAIMessage] = Field(default_factory=list)
+    stream: bool = False
 
 
 class ChatSessionCreate(BaseModel):
@@ -451,6 +472,116 @@ def create_fastapi_app(application: AetherApp) -> FastAPI:
             "method": "api_key",
             "message": result.message,
         }
+
+    # ---------- OpenAI-compatible gateway ----------
+    #
+    # Lets any tool that speaks OpenAI — Cursor, Cline, Aider, Continue, the
+    # openai SDK — point at AETHER and get its failover, compaction and budget
+    # gates underneath, without knowing AETHER exists. Set base_url to
+    # http://127.0.0.1:7420/v1 and the API token as the key.
+    #
+    # Deliberately stateless, because the protocol is: clients resend the whole
+    # history each turn, so a server-side session keyed on nothing would either
+    # duplicate that history or contradict it.
+    #
+    # `/v1/` is token-gated by the same middleware as `/api/` — see auth.py.
+    # An open one would be a relay to every provider key on the machine.
+
+    def _openai_error(status: int, message: str, err_type: str) -> JSONResponse:
+        return JSONResponse(
+            status_code=status,
+            content={"error": {"message": message, "type": err_type, "code": None}},
+        )
+
+    @api.get("/v1/models")
+    async def openai_list_models() -> dict[str, Any]:
+        """Enabled providers, in the shape an OpenAI client expects."""
+        created = int(utcnow().timestamp())
+        data = [
+            {"id": cfg.provider_id, "object": "model", "created": created, "owned_by": "aether"}
+            for cfg in application.registry.list_configs()
+            if cfg.enabled
+        ]
+        data.insert(0, {"id": "auto", "object": "model", "created": created, "owned_by": "aether"})
+        return {"object": "list", "data": data}
+
+    @api.post("/v1/chat/completions")
+    async def openai_chat_completions(body: OpenAIChatRequest) -> Any:
+        import uuid
+
+        from aether.core.chat_session import ChatMessage
+
+        if body.stream:
+            # Better an explicit, correctly-shaped refusal than a malformed SSE
+            # body that hangs the client. Non-streaming is the whole protocol
+            # for most callers; wiring stream=true is tracked as WO-26.
+            return _openai_error(
+                400,
+                "AETHER's OpenAI gateway does not support stream=true yet. "
+                "Retry with stream=false.",
+                "invalid_request_error",
+            )
+
+        user_turns = [m for m in body.messages if m.role == "user"]
+        if not user_turns:
+            return _openai_error(400, "messages must contain a user turn",
+                                 "invalid_request_error")
+
+        requested = (body.model or "auto").strip()
+        provider_id = None if requested in ("", "auto", "aether") else requested
+        if provider_id and application.registry.get(provider_id) is None:
+            return _openai_error(404, f"Unknown model '{provider_id}'. "
+                                      f"See GET /v1/models.", "invalid_request_error")
+
+        session = application.chat_router.create_session(
+            provider_id=provider_id, title="openai-gateway"
+        )
+        # Replay everything before the final user turn as history, then send
+        # that turn — chat() appends it itself.
+        last = user_turns[-1]
+        for message in body.messages:
+            if message is last:
+                break
+            content = message.content if isinstance(message.content, str) else str(message.content)
+            session.append(ChatMessage(role=message.role, content=content))
+
+        text = last.content if isinstance(last.content, str) else str(last.content)
+        result = await application.chat_router.chat(session, text)
+
+        if not result.get("ok"):
+            return _openai_error(502, result.get("error") or "all providers failed",
+                                 "upstream_error")
+
+        reply = result.get("reply") or ""
+        usage = result.get("usage") or {}
+        used = result.get("provider_id") or "unknown"
+        # Mirrors the routing transparency the timeline now carries: the caller
+        # can see which provider actually answered and whether it failed over.
+        failovers = [e for e in (result.get("events") or []) if "failover" in e]
+        return JSONResponse(
+            content={
+                "id": f"chatcmpl-{uuid.uuid4().hex[:24]}",
+                "object": "chat.completion",
+                "created": int(utcnow().timestamp()),
+                "model": used,
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": reply},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": usage.get("prompt_tokens", 0),
+                    "completion_tokens": usage.get("completion_tokens", 0),
+                    "total_tokens": usage.get("total_tokens", 0),
+                },
+            },
+            headers={
+                "X-Aether-Provider": used,
+                "X-Aether-Failovers": str(len(failovers)),
+            },
+        )
 
     # ---------- Chat / LLM router sessions ----------
     @api.get("/api/chat/sessions")

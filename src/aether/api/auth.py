@@ -27,8 +27,16 @@ from fastapi import HTTPException, Request, WebSocket
 # state, drives an agent, or accepts input.
 PUBLIC_PATHS = {"/api/health", "/docs", "/openapi.json", "/redoc"}
 
-# Only the API surface is gated. The built dashboard (static JS/CSS/HTML) holds
-# no data — every byte it displays comes from a token-gated /api call.
+# Only the API surfaces are gated. The built dashboard (static JS/CSS/HTML)
+# holds no data — every byte it displays comes from a token-gated call.
+#
+# `/v1/` is the OpenAI-compatible gateway. It must be gated for a stronger
+# reason than the dashboard API: it spends real money. An unauthenticated
+# /v1/chat/completions on loopback is an open relay to every provider key on
+# the machine, reachable by any local process.
+GUARDED_PREFIXES = ("/api/", "/v1/")
+
+# Back-compat for anything importing the old name.
 GUARDED_PREFIX = "/api/"
 
 TOKEN_FILENAME = "api_token"
@@ -87,7 +95,7 @@ def token_matches(expected: str, presented: Optional[str]) -> bool:
 def check_request(request: Request, expected: str) -> None:
     """Raise 401 unless the request carries the API token."""
     path = request.url.path
-    if not path.startswith(GUARDED_PREFIX):
+    if not path.startswith(GUARDED_PREFIXES):
         return
     if path in PUBLIC_PATHS or request.method == "OPTIONS":
         return

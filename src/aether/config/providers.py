@@ -167,6 +167,17 @@ AGGREGATORS: list[MarketProvider] = [
         roles_preferred=("architect", "implementer", "reviewer"),
     ),
     MarketProvider(
+        "omniroute", "OmniRoute (local gateway)", "aggregator",
+        "A self-hosted gateway fronting ~290 providers with its own fallback "
+        "and prompt compression — run it locally and AETHER treats the whole "
+        "lot as one provider",
+        base_url="http://127.0.0.1:8080/v1", api_key_env="OMNIROUTE_API_KEY",
+        default_model="auto", key_url="https://github.com/diegosouzapw/OmniRoute",
+        context_window=128_000, capabilities=dict(FRONTIER),
+        roles_preferred=("implementer", "researcher"),
+        note="Breadth via a gateway you run: its provider terms are its own to honour, not ours to restate.",
+    ),
+    MarketProvider(
         "openai_compatible", "Any OpenAI-compatible endpoint", "api",
         "Point base_url at anything speaking /chat/completions",
         base_url="http://127.0.0.1:11434/v1", api_key_env="OPENAI_API_KEY",

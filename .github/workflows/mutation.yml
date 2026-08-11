@@ -1,0 +1,106 @@
+name: Mutation
+
+# CONTRIBUTING.md says "a test must be able to fail". This checks it, instead of
+# leaving it to whoever remembers.
+#
+# The habit already pays: hand-run mutations during development caught a WO-24
+# test suite that stayed green when `note_dispatch` was deleted from the
+# orchestrator (every test drove the counter by hand, so they proved the router
+# worked and nothing about whether anything fed it), a WO-10 assertion on
+# `failure_count` that a later success silently reset, and a "reproduces the CI
+# failure" test that also passed against the broken configuration.
+#
+# Weekly rather than per-push: mutation runs take far longer than the suite, and
+# a survivor is a "write a better test" task, not a reason to block a merge.
+
+on:
+  schedule:
+    - cron: "0 4 * * 1"
+  workflow_dispatch:
+    inputs:
+      paths:
+        description: "Module(s) to mutate"
+        default: "src/aether/core/circuit.py src/aether/core/router.py"
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  mutmut:
+    name: mutate the routing core
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: |
+          pip install -e ".[dev]"
+          pip install mutmut
+
+      # Scoped deliberately. Mutating the whole tree would take hours and bury
+      # the signal; these are the modules where a silent wrong answer is
+      # most expensive — routing and the circuit breaker decide which provider
+      # gets the work and when one is taken out of rotation.
+      - name: Run
+        id: run
+        continue-on-error: true
+        run: |
+          mutmut run \
+            --paths-to-mutate "${{ github.event.inputs.paths || 'src/aether/core/circuit.py,src/aether/core/router.py' }}" \
+            --tests-dir tests/ \
+            --runner "python -m pytest -x -q tests/test_routing_hardening.py tests/test_correctness_fixes.py" \
+            || true
+          mutmut results | tee mutmut-results.txt
+
+      - name: Summarise
+        run: |
+          {
+            echo "## Mutation results"
+            echo '```'
+            tail -40 mutmut-results.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mutmut-results
+          path: mutmut-results.txt
+
+      - name: File an issue if mutants survived
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const out = fs.readFileSync('mutmut-results.txt', 'utf8');
+            // mutmut lists survivors under a "Survived" heading; no heading, no survivors.
+            if (!/survived/i.test(out)) {
+              core.info('No survivors.');
+              return;
+            }
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Mutation survivors in the routing core (${new Date().toISOString().slice(0,10)})`,
+              labels: ['tests'],
+              body: [
+                'The weekly mutation run left survivors: code was changed and the',
+                'tests still passed, so those paths are asserted more weakly than',
+                'they look.',
+                '',
+                'A survivor is a missing assertion, not necessarily a bug. The fix',
+                'is a test that fails against the mutant.',
+                '',
+                '```',
+                out.slice(-4000),
+                '```',
+                '',
+                `[Run](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})`,
+              ].join('\n'),
+            });

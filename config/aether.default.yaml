@@ -393,6 +393,27 @@ providers:
     args: []
 
   # Aggregators (one key, many models)
+  omniroute:
+    display_name: OmniRoute (local gateway)
+    adapter: api
+    enabled: false
+    capabilities:
+      coding: 9
+      reasoning: 9
+      research: 8
+      testing: 8
+      review: 9
+      architecture: 9
+      terminal: 5
+    roles_preferred:
+    - implementer
+    - researcher
+    context_window: 128000
+    base_url: http://127.0.0.1:8080/v1
+    model: auto
+    api_key_env: OMNIROUTE_API_KEY
+    status_note: 'Breadth via a gateway you run: its provider terms are its own to honour,
+      not ours to restate.'
   openrouter:
     display_name: OpenRouter
     adapter: api

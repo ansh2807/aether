@@ -10,7 +10,7 @@ verification. Models are pluggable adapters — not the thing in charge.
 [![CI](https://github.com/ansh2807/aether/actions/workflows/ci.yml/badge.svg)](https://github.com/ansh2807/aether/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache--2.0-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-266-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-279-brightgreen.svg)](tests/)
 
 </div>
 
@@ -257,6 +257,47 @@ providers:
 
 AETHER **never** converts subscriptions into APIs or scrapes credentials into task memory.  
 CLI adapters use subprocess + existing machine auth only.
+
+### Use AETHER from tools that speak OpenAI
+
+`aether serve` exposes an OpenAI-compatible endpoint, so Cursor, Cline, Aider,
+Continue, the `openai` SDK — anything that takes a `base_url` — can route
+through AETHER and get its failover, compaction and budget gates without
+knowing AETHER exists.
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://127.0.0.1:7420/v1",
+    api_key="<the token printed by `aether serve`>",
+)
+reply = client.chat.completions.create(
+    model="auto",                       # or a provider id from GET /v1/models
+    messages=[{"role": "user", "content": "explain this stack trace"}],
+)
+print(reply.model)                      # which provider actually answered
+```
+
+`model="auto"` lets the router choose. The response's `model` field and the
+`X-Aether-Provider` header report **who actually answered**, so a failover is
+visible rather than hidden; `X-Aether-Failovers` counts them.
+
+> **`/v1` is token-gated, like `/api`.** It spends real money — an open one
+> would be a relay to every provider key on the machine, reachable by any local
+> process. `stream=true` is not supported yet and returns an explicit 400
+> rather than a malformed stream.
+
+### Run it in Docker
+
+```bash
+docker build -t aether .
+docker run -p 7420:7420 -v aether-data:/data -v aether-ws:/workspace aether
+```
+
+Agent-CLI providers need binaries authenticated on a real machine, so a
+container is an API-provider deployment — `aether models` will show every CLI
+as not ready, which is the truth rather than a packaging fault.
 
 ### Finding a provider — `aether models`
 

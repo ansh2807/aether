@@ -6,6 +6,39 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Hardening pass over the orchestrator, control-plane state, local API and CLI.
 
+### Added — closing the gap with a gateway
+
+Taken from the OmniRoute comparison, now that the differences had been written
+down honestly. Three of its advantages were real and worth having; the rest are
+declined with reasons in `docs/ROADMAP.md`.
+
+- **`/v1/chat/completions` and `/v1/models`** — an OpenAI-compatible endpoint on
+  `aether serve`. Point Cursor, Cline, Aider, Continue or the `openai` SDK at
+  `http://127.0.0.1:7420/v1` and they get AETHER's failover, compaction and
+  budget gates without knowing AETHER exists. This was the one thing a gateway
+  could do that AETHER could not: it is an endpoint, so existing tools work
+  unchanged. Stateless, because the protocol is.
+- **`/v1/` is token-gated.** The auth middleware guarded only `/api/`; a new
+  unauthenticated route that spends money would have been an open relay to
+  every provider key on the machine, reachable by any local process. Reverting
+  the guard fails three tests, and CI asserts it against the running container.
+- The response's `model` field and `X-Aether-Provider` report **who actually
+  answered**, so a failover is visible rather than hidden. `X-Aether-Failovers`
+  counts them. An unknown model is a 404, never a silent substitution.
+- `stream=true` returns an explicit 400 rather than a malformed SSE body that
+  would hang the client. Tracked as WO-26.
+- **`omniroute` added to the provider catalogue.** Running it locally gives
+  AETHER ~290 providers and their compression through one entry — breadth
+  without adopting a provider list whose terms are not ours to restate.
+- **Dockerfile + a CI job that boots the image**, hits `/api/health`, and
+  asserts both `/api/` and `/v1/` reject unauthenticated calls. Building proves
+  it compiles; only running proves it runs. Non-root, since verification
+  executes agent-written code.
+- **A weekly mutation workflow** (`mutmut`) over the routing core, filing an
+  issue when mutants survive. CONTRIBUTING.md already required that a test be
+  able to fail; this checks it rather than trusting memory. Hand-run mutations
+  during this work caught three tests of mine that could not fail.
+
 ### Fixed — routing decisions were unexplainable after the fact
 
 - **The router's rationale was computed and thrown away.** `RouteDecision`
