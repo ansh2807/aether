@@ -10,7 +10,7 @@ verification. Models are pluggable adapters — not the thing in charge.
 [![CI](https://github.com/ansh2807/aether/actions/workflows/ci.yml/badge.svg)](https://github.com/ansh2807/aether/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache--2.0-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-223-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-227-brightgreen.svg)](tests/)
 
 </div>
 
@@ -581,7 +581,7 @@ Changes worth knowing about are in [`CHANGELOG.md`](CHANGELOG.md), including the
 open issues that are known and not yet fixed.
 
 Where the project is going: [`docs/ROADMAP.md`](docs/ROADMAP.md) — the whole
-plan in one file. One bet (*never losing work*), an honest gap table, and 22
+plan in one file. One bet (*never losing work*), an honest gap table, and 24
 work orders with acceptance criteria.
 
 ---

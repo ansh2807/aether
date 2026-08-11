@@ -12,7 +12,7 @@
 | **World-best at** | Never losing work |
 
 This is the single authoritative plan: positioning, the honest gap between claim
-and reality, 22 work orders across five milestones, and the deferred pile.
+and reality, 24 work orders across six milestones, and the deferred pile.
 
 ---
 
@@ -69,6 +69,7 @@ Until every ❌ and ⚠️ is ✅ with a test behind it, the tagline is marketin
 | **M2** | The two workloads | Real planner; verification that fits; nothing runs unsandboxed | WO-11 … WO-16 |
 | **M3** | Scale out | Per-agent worktrees; Postgres/queue option | WO-17 … WO-18 |
 | **M4** | Adoption | On PyPI, a demo that lands in 30 seconds, contributor on-ramp | WO-19 … WO-22 |
+| **M5** | Routing hardening | Terminal failures stop retrying; parallel work spreads across providers | WO-23 … WO-24 |
 
 ---
 
@@ -297,6 +298,90 @@ like an AI agent terminal". Pick the durability framing; make every surface agre
 
 ---
 
+### M5 — Routing hardening (from a look at OmniRoute)
+
+[OmniRoute](https://github.com/diegosouzapw/OmniRoute) is a local AI gateway:
+one endpoint in front of ~291 providers, with fallback, compression and a
+dashboard. It is a **different product** — a proxy for chat completions, where
+AETHER is a task orchestrator that owns state — so most of it does not
+transfer. Two ideas do, and both close gaps that exist in our code today.
+
+The rest was read and deliberately declined; see *Not doing* below. Copying a
+feature because a neighbouring project has it is how a focused tool stops being
+one.
+
+#### WO-23 · Terminal failures must stop being retried forever
+
+**The gap, in our code.** `orchestrator.py:799` calls
+`self.circuit.record_failure(provider_id)`. That signature takes only an id —
+so `circuit.py` cannot tell an expired API key from a network blip. The
+`FailureClass` is right there, computed and handed to `_failover_prep` on the
+very next line, and the breaker never sees it.
+
+The consequence: with a wrong or revoked key, the breaker opens for
+`recovery_timeout_seconds` (60s), half-opens, spends a **real subtask attempt**
+on a request that cannot succeed, reopens, and repeats — indefinitely. Nothing
+about a 401 improves by waiting.
+
+OmniRoute separates *temporary cooldown* (key exhausted, rate limited) from
+*terminal* (banned, expired, revoked) and only lets the first back into
+rotation. That distinction is the fix.
+
+**Build:**
+- `record_failure(provider_id, failure_class)`; add a `DISABLED` circuit state
+  alongside OPEN/HALF_OPEN/CLOSED.
+- Terminal set: `AUTH`, and `POLICY_DENIED` where the policy is provider-side.
+  Explicitly *not* terminal: `RATE_LIMIT`, `QUOTA` (both recover on a clock),
+  `TIMEOUT`, `NETWORK`, `CRASH`.
+- A `DISABLED` provider is skipped by the router and reported as such by
+  `aether providers` / `aether doctor`, with the reason and how to clear it.
+- Clearing is explicit — `aether connect <id>` succeeding, or
+  `aether providers reset <id>`. Never a timer, because a timer is what we are
+  removing.
+
+**Acceptance:** a provider returning 401 is attempted **once**, then skipped —
+asserted by attempt count, not by elapsed time. `aether doctor` names it and
+says what to do. A rate-limited provider still returns after cooldown, proving
+we did not over-apply terminality. Mutation check: flipping `AUTH` out of the
+terminal set must fail a test.
+
+**Cost:** small. One enum value, one parameter, one router guard.
+
+#### WO-24 · Spread concurrent subtasks across providers
+
+**The gap, in our code.** `router.py` scores capability, availability, health,
+cost, latency, failure history, role fit, user preference and continuity —
+grep it for `inflight` and you get **zero hits**. Selection is stateless with
+respect to work already in progress.
+
+So with `max_concurrent_subtasks: 4`, four subtasks dispatched together see
+identical scores and all four pick the same top provider. They queue behind one
+rate limit while healthy providers sit idle — and parallel mode is precisely
+where AETHER claims to use several agents at once.
+
+The orchestrator already tracks `self._inflight`. The data exists; the router
+just never asked for it.
+
+**Build:**
+- An in-flight count per provider, read by `select()` as a load penalty term
+  (`routing.weights.load`, defaulting low so capability still dominates).
+- Power-of-two-choices rather than strict least-loaded: sample two viable
+  candidates, take the less busy. Cheap, and it avoids the herd stampeding onto
+  whichever provider is momentarily idle.
+- Add the load term to the existing `reasons` list, so a decision stays
+  auditable.
+
+**Acceptance:** eight concurrent subtasks with three healthy equal-capability
+providers land on **at least two** of them; today they all land on one. A
+single subtask still picks the best-scoring provider, so we have not traded
+quality for spread. Measured before/after and recorded in the commit, the way
+the parallel-write fix was.
+
+**Cost:** small-to-medium. Localised to `router.select()` plus a counter the
+orchestrator already maintains.
+
+---
+
 ## 5. Sequencing
 
 ```
@@ -352,3 +437,31 @@ Real demand should pull these, not enthusiasm:
 - **Chasing model capability.** Providers do that. AETHER's job is to survive them.
 - **Auto-approving destructive commands.** The approval gate is the point.
 - **Scraping subscription auth into API calls.** Non-negotiable.
+
+### Considered from OmniRoute and declined
+
+Recorded so the decision does not get re-litigated, and so it can be revisited
+with a reason rather than a whim.
+
+- **A prompt-compression pipeline** (theirs stacks 12 engines, claims ~89%
+  average shrink). Attractive, and we already tried the premise: WO-04 assumed
+  the context package was blowing its budget, then **measured it at 1816
+  tokens**. There is no problem here to solve. A gateway proxying millions of
+  chat turns has completely different economics from an orchestrator sending a
+  few structured handoffs per task.
+- **291 providers.** We just shipped ~30 and were careful to mark which
+  endpoints have actually been called. Their own README flags 15 providers'
+  terms of service; "respect provider auth and terms" is one of our stated
+  rules. Breadth is their product. Ours is that the task survives.
+- **19 named routing strategies.** One weighted scorer already expresses the
+  useful ones as weights. Nineteen names is configuration surface, not
+  capability — and a deterministic orchestrator benefits from having *one*
+  explicable decision path.
+- **Model-level lockout separate from provider-level.** Real in a gateway
+  fronting many models per key. In AETHER a provider config is essentially one
+  model, so the breaker already sits at the right granularity. Revisit if
+  multi-model provider entries land.
+- **MCP / A2A protocol surfaces.** Genuinely interesting, and orthogonal to the
+  durability bet. Not before v0.1.0.
+- **Free-tier quota aggregation and pooling.** Optimises for spending nothing.
+  We optimise for not losing work. Different bet.
