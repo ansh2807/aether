@@ -42,8 +42,9 @@ class CliAgentAdapter(BaseAdapter):
         config: ProviderConfig,
         sandbox: Optional[ExecutionSandbox] = None,
         max_output_bytes: int = 2_000_000,
+        network_retries: Optional[int] = None,
     ) -> None:
-        super().__init__(config)
+        super().__init__(config, network_retries=network_retries)
         self.sandbox = sandbox
         self.max_output_bytes = max_output_bytes
         self._procs: dict[str, asyncio.subprocess.Process] = {}
@@ -118,6 +119,15 @@ class CliAgentAdapter(BaseAdapter):
         )
 
     async def execute(self, request: ExecutionRequest) -> ExecutionResult:
+        """Retry NETWORK/TIMEOUT failures with backoff before returning.
+
+        The orchestrator only sees the final result of this call, so a
+        retry-exhausted attempt still costs exactly one circuit-breaker
+        failure, not one per try.
+        """
+        return await self._execute_with_retry(lambda: self._execute_once(request))
+
+    async def _execute_once(self, request: ExecutionRequest) -> ExecutionResult:
         start = time.perf_counter()
         path = self._command_path()
         if not path:

@@ -139,3 +139,58 @@ class TaskExporter:
     async def import_json(self, path: Path, as_paused: bool = True) -> Task:
         data = json.loads(path.read_text(encoding="utf-8"))
         return await self.import_dict(data, as_paused=as_paused)
+
+    async def import_bundle(
+        self,
+        path: Path,
+        workspace_root: Path,
+        as_paused: bool = True,
+        skip_existing_events: bool = True,
+    ) -> Task:
+        """Import an `export_bundle` zip — the counterpart that makes the
+        workspace actually travel.
+
+        `import_json`/`import_dict` only ever restored database rows. If the
+        bundle also carries a workspace (written by `export_bundle`), this
+        unpacks it under `workspace_root` on *this* machine and rewrites the
+        task's `workspace_path` to that new absolute location. The path
+        recorded in the export belongs to the source machine — it will not
+        exist here, and importing without the rewrite means resume either
+        fails closed (workspace missing) or, worse, silently writes into
+        whatever unrelated directory happens to occupy that same path on the
+        new machine.
+        """
+        with zipfile.ZipFile(path, "r") as zf:
+            try:
+                raw = zf.read("task.json")
+            except KeyError as exc:
+                raise ValueError("Not an aether task bundle: missing task.json") from exc
+            data: dict[str, Any] = json.loads(raw.decode("utf-8"))
+
+            task_id = (data.get("task") or {}).get("task_id")
+            if not task_id:
+                raise ValueError("Bundle task.json is missing task.task_id")
+
+            dest_ws = (Path(workspace_root) / task_id).resolve()
+            dest_ws.mkdir(parents=True, exist_ok=True)
+
+            prefix = "workspace/"
+            for member in zf.infolist():
+                if member.is_dir() or not member.filename.startswith(prefix):
+                    continue
+                rel = member.filename[len(prefix):]
+                if not rel:
+                    continue
+                target = (dest_ws / rel).resolve()
+                if target != dest_ws and dest_ws not in target.parents:
+                    # zip entry tried to escape the destination workspace dir
+                    raise ValueError(f"Unsafe path in bundle: {member.filename}")
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with zf.open(member) as src, open(target, "wb") as out:
+                    out.write(src.read())
+
+            # Always rewrite, even when the bundle carried no workspace files:
+            # the source machine's absolute path is meaningless here either way.
+            data["task"]["workspace_path"] = str(dest_ws)
+
+        return await self.import_dict(data, as_paused=as_paused, skip_existing_events=skip_existing_events)

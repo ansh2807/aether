@@ -10,7 +10,7 @@ verification. Models are pluggable adapters — not the thing in charge.
 [![CI](https://github.com/ansh2807/aether/actions/workflows/ci.yml/badge.svg)](https://github.com/ansh2807/aether/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache--2.0-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-116-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-156-brightgreen.svg)](tests/)
 
 </div>
 
@@ -251,6 +251,34 @@ aether logs [TASK-...]
 aether checkpoint list TASK-...
 aether serve
 ```
+
+### Moving a task to another machine
+
+`aether task export`/`import` (above) round-trip task state as JSON — enough
+for backup, but not enough to *resume* elsewhere: the workspace (whatever
+files the agents produced) never leaves the source machine. `TaskExporter`
+has a second pair of methods that carries the workspace too:
+
+```python
+# On the source machine — bundles DB state *and* the task's workspace into one zip
+await app.exporter.export_bundle(task_id, Path("handoff.zip"), workspace=Path(task.workspace_path))
+
+# On the destination machine — unpacks the workspace under this machine's
+# workspace_root and rewrites the task's workspace_path to the new location
+task = await app.exporter.import_bundle(bundle_path, app.settings.workspace_root)
+await app.orchestrator.resume_task(task.task_id)
+```
+
+This is the pair proven by `tests/test_export_resume.py`: two fully separate
+`AetherApp`s (separate `data_dir`, separate `workspace_root`, nothing shared
+but the zip) — a half-finished task exported from one, imported into the
+other, and resumed to `COMPLETED` there. Artifacts written before the move,
+the handoff trail, and checkpoints all survive; `workspace_path` no longer
+points at the source machine once imported.
+
+The plain `task export`/`import` CLI commands are still JSON-only (no
+workspace) — reach for the `export_bundle`/`import_bundle` API above when the
+workspace needs to travel with the task.
 
 ### The interactive terminal
 

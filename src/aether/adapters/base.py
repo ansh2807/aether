@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import re
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Awaitable, Callable, Optional
 
+from aether.adapters.retry import execute_with_retry
+from aether.config.settings import OrchestratorSettings
 from aether.domain.enums import FailureClass, HandoffStatus, ProviderAvailability
 from aether.domain.models import (
     AuthStatus,
     CapabilityProfile,
     ExecutionRequest,
+    ExecutionResult,
     HandoffReport,
     HealthStatus,
     LimitSnapshot,
@@ -19,16 +22,41 @@ from aether.domain.models import (
     utcnow,
 )
 
+# Default retry count used when a caller doesn't supply one, sourced from
+# OrchestratorSettings' own default so there is one definition of "how many
+# retries by default", not a duplicated literal. Callers that build adapters
+# from loaded settings (e.g. AgentRegistry) should pass
+# settings.orchestrator.network_retries explicitly to honour the operator's
+# actual config rather than this fallback.
+DEFAULT_NETWORK_RETRIES = OrchestratorSettings().network_retries
+
 
 class BaseAdapter:
     """Shared adapter utilities. Subclasses implement real I/O."""
 
-    def __init__(self, config: ProviderConfig) -> None:
+    def __init__(self, config: ProviderConfig, network_retries: Optional[int] = None) -> None:
         self.config = config
         self.provider_id = config.provider_id
         self._usage = UsageSnapshot(provider_id=config.provider_id)
         self._active: dict[str, Any] = {}
         self._initialized = False
+        self.network_retries = (
+            DEFAULT_NETWORK_RETRIES if network_retries is None else network_retries
+        )
+
+    async def _execute_with_retry(
+        self, execute_once: Callable[[], Awaitable[ExecutionResult]]
+    ) -> ExecutionResult:
+        """Run a single attempt through the shared retry/backoff helper.
+
+        Subclasses that perform real I/O should implement their attempt logic
+        in a private method (e.g. ``_execute_once``) and have their public
+        ``execute`` call this, so the orchestrator still only ever observes
+        one ``ExecutionResult`` per top-level call.
+        """
+        return await execute_with_retry(
+            execute_once, self.network_retries, provider_id=self.provider_id
+        )
 
     async def initialize(self) -> None:
         self._initialized = True

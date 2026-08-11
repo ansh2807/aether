@@ -29,8 +29,13 @@ log = get_logger("aether.adapters.api")
 
 
 class ApiAgentAdapter(BaseAdapter):
-    def __init__(self, config: ProviderConfig, client: Optional[httpx.AsyncClient] = None) -> None:
-        super().__init__(config)
+    def __init__(
+        self,
+        config: ProviderConfig,
+        client: Optional[httpx.AsyncClient] = None,
+        network_retries: Optional[int] = None,
+    ) -> None:
+        super().__init__(config, network_retries=network_retries)
         self._client = client
         self._owns_client = client is None
 
@@ -125,6 +130,15 @@ class ApiAgentAdapter(BaseAdapter):
             )
 
     async def execute(self, request: ExecutionRequest) -> ExecutionResult:
+        """Retry NETWORK/TIMEOUT failures with backoff before returning.
+
+        The orchestrator only sees the final result of this call, so a
+        retry-exhausted attempt still costs exactly one circuit-breaker
+        failure, not one per try.
+        """
+        return await self._execute_with_retry(lambda: self._execute_once(request))
+
+    async def _execute_once(self, request: ExecutionRequest) -> ExecutionResult:
         start = time.perf_counter()
         await self.initialize()
         assert self._client is not None

@@ -86,9 +86,12 @@ class AgentRegistry:
                 cfg,
                 sandbox=self.sandbox,
                 max_output_bytes=self.settings.security.max_subprocess_output_bytes,
+                network_retries=self.settings.orchestrator.network_retries,
             )
         if cfg.adapter == AdapterType.API:
-            return ApiAgentAdapter(cfg)
+            return ApiAgentAdapter(
+                cfg, network_retries=self.settings.orchestrator.network_retries
+            )
         if cfg.adapter == AdapterType.UNAVAILABLE:
             return UnavailableAdapter(cfg)
         return UnavailableAdapter(cfg)

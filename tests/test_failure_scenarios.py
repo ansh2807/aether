@@ -179,8 +179,13 @@ async def test_16_provider_back_online_circuit():
     cb = CircuitBreaker(CircuitBreakerSettings(failure_threshold=1, recovery_timeout_seconds=0))
     cb.record_failure("p")
     assert not cb.allow("p") or cb.snapshot("p").state.value in {"OPEN", "HALF_OPEN"}
-    # force half open
-    assert cb.allow("p")  # recovery 0
+    # recovery_timeout_seconds=0, so the allow() call above already forced
+    # OPEN -> HALF_OPEN and consumed the sole probe budget
+    # (half_open_max_calls defaults to 1, now enforced by CircuitBreaker.allow
+    # -- see WO-03). A second concurrent probe request is correctly refused
+    # rather than let through unbounded.
+    assert cb.snapshot("p").state.value == "HALF_OPEN"
+    assert not cb.allow("p")
     cb.record_success("p")
     assert cb.allow("p")
 
