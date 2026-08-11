@@ -107,6 +107,9 @@ flowchart TB
     TM <--> DB[("SQLite<br/>tasks · memory · handoffs<br/>checkpoints · timeline")]
 ```
 
+**What survives what:** [`docs/DURABILITY.md`](docs/DURABILITY.md) — every
+guarantee cites the test that proves it, and the gaps are listed just as plainly.
+
 Full design: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) ·
 Failure matrix: [`docs/FAILURE_SCENARIOS.md`](docs/FAILURE_SCENARIOS.md) ·
 Handoff contract: [`docs/HANDOFF_PROTOCOL.md`](docs/HANDOFF_PROTOCOL.md)
