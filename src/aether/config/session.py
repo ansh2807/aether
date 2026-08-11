@@ -8,12 +8,15 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 import yaml
 from pydantic import BaseModel, Field
 
 from aether.domain.enums import TaskMode
+
+if TYPE_CHECKING:  # avoids a cycle: providers is imported lazily below
+    from aether.config.providers import MarketProvider
 
 
 class UserProfile(BaseModel):
@@ -337,6 +340,52 @@ OPENCODE_FALLBACK_MODELS: list[str] = [
 ]
 
 
+def _catalog_entry_from_market(p: "MarketProvider") -> dict[str, Any]:
+    """Render a `config.providers` entry in the login catalogue's shape."""
+    entry: dict[str, Any] = {
+        "id": p.id,
+        "name": p.name,
+        "family": p.id,
+        "kind": "cli" if p.kind == "cli" else "api",
+        "connect": "cli_oauth" if p.kind == "cli" else ("none" if p.kind == "local" else "browser_key"),
+        "models": [p.default_model] if p.default_model else [],
+        "default_model": p.default_model,
+        "blurb": p.blurb,
+        "extended": True,
+        "verified": p.verified,
+    }
+    if p.kind == "cli":
+        entry["command"] = p.command
+    else:
+        entry["base_url"] = p.base_url
+        if p.api_key_env:
+            entry["api_key_env"] = p.api_key_env
+    if p.key_url:
+        entry["key_url"] = p.key_url
+    return entry
+
+
+def _extend_catalog() -> None:
+    """Fold the wider market catalogue into the login catalogue.
+
+    The curated lineup above stays hand-written — it carries real model lists
+    and wording the wizard depends on. Everything else in `config.providers`
+    is appended so `aether connect <id>` and `aether models` reach it, marked
+    `extended` so the wizard can keep its short list short.
+    """
+    from aether.config.providers import ALL_PROVIDERS
+
+    known = {c["id"] for c in PROVIDER_CATALOG}
+    for p in ALL_PROVIDERS:
+        if p.id in known or p.id == "generic_cli":
+            continue
+        PROVIDER_CATALOG.append(_catalog_entry_from_market(p))
+        known.add(p.id)
+
+
+_extend_catalog()
+
+
 def catalog_by_id(provider_id: str) -> Optional[dict[str, Any]]:
     for c in PROVIDER_CATALOG:
         if c["id"] == provider_id:
@@ -345,12 +394,21 @@ def catalog_by_id(provider_id: str) -> Optional[dict[str, Any]]:
 
 
 def primary_login_providers() -> list[dict[str, Any]]:
-    """Providers shown first in the login wizard."""
+    """Providers shown in the login wizard.
+
+    Deliberately short. The full market catalogue is dozens of entries long;
+    presenting all of it at first run is a worse experience than presenting
+    five and pointing at `aether models` for the rest.
+    """
     order = ["claude_cli", "gemini", "grok", "kimi", "opencode_cli"]
     by_id = {c["id"]: c for c in PROVIDER_CATALOG}
     out = [by_id[i] for i in order if i in by_id]
-    # extras
     for c in PROVIDER_CATALOG:
-        if c["id"] not in order:
+        if c["id"] not in order and not c.get("extended"):
             out.append(c)
     return out
+
+
+def all_catalog_providers() -> list[dict[str, Any]]:
+    """Every provider AETHER knows how to connect, curated and extended."""
+    return list(PROVIDER_CATALOG)

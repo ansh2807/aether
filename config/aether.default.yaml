@@ -306,6 +306,305 @@ providers:
       architecture: 6
     roles_preferred: [implementer]
 
+  # --- The wider market -------------------------------------------------
+  #
+  # All disabled. Enable one and run `aether connect <id>`, or just run
+  # `aether models` to see this list with what your machine can already
+  # reach. Endpoints below come from vendor documentation and have not been
+  # exercised from here; if one is stale, health checks fail it and the
+  # router routes around it. See src/aether/config/providers.py.
+
+  # Agent CLIs (use the login you already have)
+  gemini_cli:
+    display_name: Gemini CLI
+    adapter: cli
+    enabled: false
+    capabilities:
+      coding: 9
+      reasoning: 9
+      testing: 9
+      terminal: 10
+      review: 8
+      architecture: 8
+    roles_preferred:
+    - researcher
+    - implementer
+    context_window: 1000000
+    command: gemini
+    args: []
+  grok_cli:
+    display_name: Grok CLI
+    adapter: cli
+    enabled: false
+    capabilities:
+      coding: 9
+      reasoning: 9
+      testing: 9
+      terminal: 10
+      review: 8
+      architecture: 8
+    context_window: 128000
+    command: grok
+    args: []
+  aider:
+    display_name: Aider
+    adapter: cli
+    enabled: false
+    capabilities:
+      coding: 9
+      reasoning: 9
+      testing: 9
+      terminal: 10
+      review: 8
+      architecture: 8
+    roles_preferred:
+    - implementer
+    - debugger
+    context_window: 128000
+    command: aider
+    args: []
+  cursor_cli:
+    display_name: Cursor CLI
+    adapter: cli
+    enabled: false
+    capabilities:
+      coding: 9
+      reasoning: 9
+      testing: 9
+      terminal: 10
+      review: 8
+      architecture: 8
+    context_window: 128000
+    command: cursor-agent
+    args: []
+  copilot_cli:
+    display_name: GitHub Copilot CLI
+    adapter: cli
+    enabled: false
+    capabilities:
+      coding: 9
+      reasoning: 9
+      testing: 9
+      terminal: 10
+      review: 8
+      architecture: 8
+    context_window: 128000
+    command: copilot
+    args: []
+
+  # Aggregators (one key, many models)
+  openrouter:
+    display_name: OpenRouter
+    adapter: api
+    enabled: false
+    capabilities:
+      coding: 9
+      reasoning: 9
+      research: 8
+      testing: 8
+      review: 9
+      architecture: 9
+      terminal: 5
+    roles_preferred:
+    - architect
+    - implementer
+    - reviewer
+    context_window: 200000
+    base_url: https://openrouter.ai/api/v1
+    model: anthropic/claude-sonnet-4.5
+    api_key_env: OPENROUTER_API_KEY
+
+  # Hosted APIs (bring a key)
+  anthropic:
+    display_name: Anthropic (Claude API)
+    adapter: api
+    enabled: false
+    capabilities:
+      coding: 9
+      reasoning: 9
+      research: 8
+      testing: 8
+      review: 9
+      architecture: 9
+      terminal: 5
+    roles_preferred:
+    - architect
+    - implementer
+    - reviewer
+    - debugger
+    context_window: 200000
+    base_url: https://api.anthropic.com/v1
+    model: claude-sonnet-4-5
+    api_key_env: ANTHROPIC_API_KEY
+    status_note: Anthropic's native API is not the OpenAI shape; needs its OpenAI-compatible
+      endpoint or a dedicated adapter.
+  deepseek:
+    display_name: DeepSeek
+    adapter: api
+    enabled: false
+    capabilities:
+      coding: 9
+      reasoning: 8
+      testing: 8
+      review: 8
+      architecture: 8
+      terminal: 5
+    roles_preferred:
+    - implementer
+    - debugger
+    context_window: 64000
+    base_url: https://api.deepseek.com
+    model: deepseek-chat
+    api_key_env: DEEPSEEK_API_KEY
+  mistral:
+    display_name: Mistral
+    adapter: api
+    enabled: false
+    capabilities:
+      coding: 9
+      reasoning: 8
+      testing: 8
+      review: 8
+      architecture: 8
+      terminal: 5
+    roles_preferred:
+    - implementer
+    context_window: 128000
+    base_url: https://api.mistral.ai/v1
+    model: mistral-large-latest
+    api_key_env: MISTRAL_API_KEY
+  groq:
+    display_name: Groq
+    adapter: api
+    enabled: false
+    capabilities:
+      coding: 7
+      reasoning: 7
+      research: 6
+      testing: 6
+      review: 6
+      architecture: 6
+      terminal: 4
+    roles_preferred:
+    - tester
+    - researcher
+    context_window: 128000
+    base_url: https://api.groq.com/openai/v1
+    model: llama-3.3-70b-versatile
+    api_key_env: GROQ_API_KEY
+  together:
+    display_name: Together AI
+    adapter: api
+    enabled: false
+    capabilities:
+      coding: 7
+      reasoning: 7
+      research: 6
+      testing: 6
+      review: 6
+      architecture: 6
+      terminal: 4
+    context_window: 128000
+    base_url: https://api.together.xyz/v1
+    model: meta-llama/Llama-3.3-70B-Instruct-Turbo
+    api_key_env: TOGETHER_API_KEY
+  fireworks:
+    display_name: Fireworks AI
+    adapter: api
+    enabled: false
+    capabilities:
+      coding: 7
+      reasoning: 7
+      research: 6
+      testing: 6
+      review: 6
+      architecture: 6
+      terminal: 4
+    context_window: 128000
+    base_url: https://api.fireworks.ai/inference/v1
+    model: accounts/fireworks/models/llama-v3p3-70b-instruct
+    api_key_env: FIREWORKS_API_KEY
+  perplexity:
+    display_name: Perplexity
+    adapter: api
+    enabled: false
+    capabilities:
+      research: 9
+      reasoning: 8
+      review: 7
+      coding: 6
+      architecture: 6
+      testing: 5
+    roles_preferred:
+    - researcher
+    context_window: 128000
+    base_url: https://api.perplexity.ai
+    model: sonar
+    api_key_env: PERPLEXITY_API_KEY
+  qwen:
+    display_name: Qwen (DashScope)
+    adapter: api
+    enabled: false
+    capabilities:
+      coding: 9
+      reasoning: 8
+      testing: 8
+      review: 8
+      architecture: 8
+      terminal: 5
+    context_window: 128000
+    base_url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+    model: qwen-max
+    api_key_env: DASHSCOPE_API_KEY
+
+  # Local runtimes (no key, nothing leaves the machine)
+  ollama:
+    display_name: Ollama (local)
+    adapter: api
+    enabled: false
+    capabilities:
+      coding: 7
+      reasoning: 7
+      research: 6
+      testing: 6
+      review: 6
+      architecture: 6
+      terminal: 4
+    context_window: 32000
+    base_url: http://127.0.0.1:11434/v1
+    model: llama3.2
+  lmstudio:
+    display_name: LM Studio (local)
+    adapter: api
+    enabled: false
+    capabilities:
+      coding: 7
+      reasoning: 7
+      research: 6
+      testing: 6
+      review: 6
+      architecture: 6
+      terminal: 4
+    context_window: 32000
+    base_url: http://127.0.0.1:1234/v1
+    model: local-model
+  vllm:
+    display_name: vLLM (self-hosted)
+    adapter: api
+    enabled: false
+    capabilities:
+      coding: 7
+      reasoning: 7
+      research: 6
+      testing: 6
+      review: 6
+      architecture: 6
+      terminal: 4
+    context_window: 32000
+    base_url: http://127.0.0.1:8000/v1
+    model: served-model
+
+
 routing:
   weights:
     capability: 0.45

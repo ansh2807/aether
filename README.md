@@ -222,9 +222,54 @@ providers:
 AETHER **never** converts subscriptions into APIs or scrapes credentials into task memory.  
 CLI adapters use subprocess + existing machine auth only.
 
+### Finding a provider — `aether models`
+
+You do not have to read the config to learn what plugs in. `aether models`
+lists everything AETHER knows how to connect and marks what this machine can
+already reach:
+
+```bash
+aether models                # the whole catalogue, grouped
+aether models --ready        # only what works here right now
+aether models --kind cli     # cli | aggregator | api | local
+aether models -s deepseek    # search
+```
+
+```text
+Agent CLIs (use the login you already have)
+ ID             Provider        Default model         Ready  How
+ claude_cli     Claude Code     claude (CLI default)    ✓    installed: claude
+ codex_cli      Codex CLI       codex (CLI default)     ✗    install the codex CLI
+
+Hosted APIs (bring a key)
+ deepseek       DeepSeek        deepseek-chat           ✗    needs $DEEPSEEK_API_KEY
+```
+
+Roughly thirty providers ship in the default config, all **disabled**, across
+four groups:
+
+| Group | Examples | What you need |
+| --- | --- | --- |
+| **Agent CLIs** | Claude Code, Codex, Gemini CLI, Open Code, Aider, Cursor, Copilot, Grok | the CLI installed and already logged in |
+| **Aggregators** | OpenRouter | one key, hundreds of models from every major lab |
+| **Hosted APIs** | OpenAI, Anthropic, Gemini, Grok, DeepSeek, Mistral, Groq, Together, Fireworks, Perplexity, Kimi, Qwen | an API key |
+| **Local** | Ollama, LM Studio, vLLM | a server running — no key, nothing leaves the machine |
+
+Anything speaking the OpenAI `/chat/completions` shape works even if it is not
+listed: use `openai_compatible` and set `base_url`.
+
+> **`Ready` means the key or CLI is present, not that the endpoint answered.**
+> Most catalogue entries were transcribed from vendor documentation and have
+> never been called from AETHER — `aether models` tells you how many. A stale
+> endpoint fails its health check and the router routes around it; it does not
+> corrupt a task. `aether connect <id>` is what turns a listing into a fact.
+
 ### Unavailable providers
 
-`kimi`, `hermes`, `antigravity` ship as `adapter: unavailable` with status **ADAPTER_REQUIRED** until you implement a real adapter.
+`hermes` and `antigravity` ship as `adapter: unavailable` with status
+**ADAPTER_REQUIRED** until someone implements a real adapter. They are listed
+rather than hidden so that "not supported" never looks like "supported and
+broken".
 
 ---
 
@@ -243,7 +288,9 @@ aether task trace TASK-...
 aether agents
 aether agents health
 aether agents test mock
-aether providers
+aether providers                    # what is configured
+aether models                       # what could be connected (+ --ready, --kind, -s)
+aether connect <id>
 aether status
 aether doctor                       # system diagnostics
 aether metrics [TASK-...]

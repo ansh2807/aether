@@ -32,6 +32,7 @@ from aether.cli.ui import (
     FAIL,
     GTE,
     OK,
+    check_text,
     console,
     data_table,
     health_text,
@@ -170,6 +171,42 @@ def render_banner() -> None:
         )
     )
     console.print()
+
+
+def _print_model_catalog(kind: Optional[str] = None) -> None:
+    """`/models` — the whole connectable market, and what is ready here.
+
+    Deliberately independent of the running app: this answers "what could I
+    plug in", which is a different question from "what is enabled".
+    """
+    from aether.config.providers import KIND_LABEL, KIND_ORDER, is_ready, selectable
+
+    wanted = (kind or "").strip().lower() or None
+    if wanted and wanted not in KIND_ORDER:
+        console.print(f"[muted]Unknown group '{wanted}'. Try: {', '.join(KIND_ORDER)}[/]")
+        return
+
+    for k in KIND_ORDER:
+        if wanted and k != wanted:
+            continue
+        group = [p for p in selectable() if p.kind == k]
+        if not group:
+            continue
+        table = data_table(
+            "ID", "Provider", "Default model", {"header": "Ready", "justify": "center"},
+            title=KIND_LABEL[k],
+        )
+        for p in group:
+            ready = is_ready(p)
+            table.add_row(
+                f"[value]{p.id}[/]" if ready else f"[muted]{p.id}[/]",
+                p.name,
+                (p.default_model or "-")[:30],
+                check_text(ready),
+            )
+        console.print(table)
+
+    console.print("[muted]Connect one with[/] [accent]/connect <id>[/]")
 
 
 async def _print_status(app: AetherApp, session: Optional[ChatSession], mode: str) -> None:
@@ -330,6 +367,11 @@ async def run_terminal(
                 if cfg.enabled or cfg.for_testing:
                     table.add_row(cfg.provider_id, (cfg.model or "-")[:36], str(cfg.enabled))
             console.print(table)
+            continue
+
+        if raw.split(maxsplit=1)[0] in {"/models", "/catalog"}:
+            parts = raw.split(maxsplit=1)
+            _print_model_catalog(parts[1].strip() if len(parts) > 1 else None)
             continue
 
         if raw == "/sessions":

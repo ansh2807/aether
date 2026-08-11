@@ -28,3 +28,7 @@ web/.vite/
 .idea/
 .vscode/
 *.swp
+
+# Local config written by `aether setup`. Machine-specific, and a future
+# run may put more in it than the default template ever had.
+config/aether.yaml

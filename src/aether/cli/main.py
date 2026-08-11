@@ -300,6 +300,87 @@ def providers_cmd(config: Optional[str] = typer.Option(None, "--config", "-c")) 
     _run(_go())
 
 
+@app.command("models")
+def models_cmd(
+    kind: Optional[str] = typer.Option(
+        None, "--kind", "-k", help="cli | aggregator | api | local"
+    ),
+    search: Optional[str] = typer.Option(None, "--search", "-s", help="Filter by name or id"),
+    ready_only: bool = typer.Option(
+        False, "--ready", help="Only providers this machine can already reach"
+    ),
+) -> None:
+    """Every model provider AETHER can connect to, and which are ready here.
+
+    Reads no database and boots nothing, so it works before `aether setup`.
+    """
+    from aether.config.providers import KIND_LABEL, KIND_ORDER, is_ready, selectable
+
+    _load_local_secrets()
+
+    needle = (search or "").lower()
+    shown = 0
+
+    for k in KIND_ORDER:
+        if kind and kind != k:
+            continue
+        group = [p for p in selectable() if p.kind == k]
+        if needle:
+            group = [p for p in group if needle in p.id.lower() or needle in p.name.lower()]
+
+        rows = []
+        for p in group:
+            ready = is_ready(p)
+            if p.kind == "cli":
+                how = f"installed: {p.command}" if ready else f"install the {p.command} CLI"
+            elif p.kind == "local":
+                how = "server running" if ready else f"start a server at {p.base_url}"
+            else:
+                how = f"key set ({p.api_key_env})" if ready else f"needs ${p.api_key_env}"
+            if ready_only and not ready:
+                continue
+            rows.append((p, ready, how))
+
+        if not rows:
+            continue
+
+        table = data_table(
+            "ID",
+            "Provider",
+            "Default model",
+            {"header": "Ready", "justify": "center"},
+            "How",
+            title=KIND_LABEL[k],
+        )
+        for p, ready, how in rows:
+            table.add_row(
+                f"[value]{p.id}[/]" if ready else f"[muted]{p.id}[/]",
+                p.name,
+                truncate(p.default_model or "-", 30),
+                check_text(ready),
+                f"[muted]{truncate(how, 34)}[/]",
+            )
+        console.print(table)
+        shown += len(rows)
+
+    if not shown:
+        console.print("[muted]Nothing matched that filter.[/]")
+        return
+
+    noun = "provider" if shown == 1 else "providers"
+    console.print(f"\n[muted]{shown} {noun} listed. Connect one:[/] [accent]aether connect <id>[/]")
+    console.print(
+        "[muted]'Ready' means the key or CLI is present on this machine, not that the\n"
+        "endpoint has been called. `aether connect` is what proves it works.[/]"
+    )
+    if not (ready_only or kind or search):
+        unverified = [p for p in selectable() if not p.verified]
+        console.print(
+            f"[muted]{len(unverified)} entries were taken from vendor docs and never "
+            "exercised from here — expect the occasional stale endpoint.[/]"
+        )
+
+
 @app.command("logs")
 def logs_cmd(
     task_id: Optional[str] = typer.Argument(None),

@@ -59,8 +59,16 @@ def test_prefix_narrows_to_the_right_command(typed: str, expected: str):
 
 
 def test_alias_completes_to_its_command():
-    # "/models" is an alias of "/setup"
-    assert "/setup" in [c.name for c in command_completions("/mod")]
+    # "/reconfigure" is an alias of "/setup"; typing the alias must find it
+    assert "/setup" in [c.name for c in command_completions("/recon")]
+    # "/catalog" is an alias of "/models"
+    assert "/models" in [c.name for c in command_completions("/cata")]
+
+
+def test_models_is_its_own_command_not_a_setup_alias():
+    """`/models` used to re-run the wizard, which is not what the name promises."""
+    names = [c.name for c in command_completions("/models")]
+    assert names == ["/models"], f"expected the catalogue command, got {names}"
 
 
 def test_no_menu_for_plain_chat():

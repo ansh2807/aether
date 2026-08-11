@@ -6,6 +6,39 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Hardening pass over the orchestrator, control-plane state, local API and CLI.
 
+### Added — provider catalogue
+
+- **`aether models` / `/models`** — lists every provider AETHER can connect to,
+  grouped as agent CLIs, aggregators, hosted APIs and local runtimes, with a
+  readiness column for this machine. Boots nothing and reads no database, so it
+  works before `aether setup`. Filters: `--ready`, `--kind`, `--search`.
+- **~17 new providers** in `src/aether/config/providers.py` and the default
+  config, all disabled: Anthropic, DeepSeek, Mistral, Groq, Together,
+  Fireworks, Perplexity, Qwen, OpenRouter (aggregator); Gemini CLI, Aider,
+  Cursor, Copilot and Grok CLIs; Ollama, LM Studio and vLLM locally. No new
+  adapter code — the OpenAI-compatible and CLI adapters already cover all of
+  them, so these are configuration.
+- Readiness is checked honestly per group: CLIs against `PATH`, hosted APIs
+  against the key variable, local runtimes with a 150 ms TCP probe. An earlier
+  draft showed every local runtime as ready whether or not a server was
+  running; a green tick that is always green means nothing.
+- The catalogue states, in the CLI and the README, that most entries were
+  transcribed from vendor documentation and never exercised from AETHER. The
+  `verified` flag is asserted in tests to stay confined to what really has been.
+
+### Changed
+
+- **`/models` is no longer an alias for `/setup`.** It now shows the catalogue,
+  which is what the name promises; `/setup` keeps `/reconfigure`.
+- The login wizard still offers the short curated lineup. Extended providers are
+  reachable via `aether connect <id>` and `aether models` but do not turn first
+  run into a wall of thirty options — enforced by a test.
+- Distribution renamed to **`aether-orchestrator`** (`aether` is taken on PyPI).
+  The import package and the `aether` command are unchanged. Added classifiers,
+  keywords and project URLs; the build passes `twine check`.
+- README: corrected a stale claim that `kimi` ships as `adapter: unavailable` —
+  it has been a real `api` provider for some time.
+
 ### Fixed — correctness
 
 - **Mock agent could absorb real work.** `for_testing` providers were routable

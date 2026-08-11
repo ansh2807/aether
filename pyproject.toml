@@ -3,13 +3,32 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "aether"
+# Distribution name differs from the import package: `aether` is already
+# taken on PyPI. `import aether` and the `aether` command are unchanged.
+name = "aether-orchestrator"
 version = "0.1.0"
-description = "AETHER — Universal Multi-Agent AI Orchestrator"
+description = "A deterministic orchestrator for multi-agent AI work: the task survives when the model does not"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Apache-2.0" }
-authors = [{ name = "AETHER" }]
+authors = [{ name = "ansh2807" }]
+keywords = [
+  "ai", "agents", "multi-agent", "orchestration", "llm", "failover",
+  "durability", "claude", "openai", "agent-framework",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Software Development :: Build Tools",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Typing :: Typed",
+]
+
 dependencies = [
   "fastapi>=0.115.0",
   "uvicorn[standard]>=0.32.0",
@@ -65,3 +84,10 @@ pythonpath = ["src"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+
+[project.urls]
+Homepage = "https://github.com/ansh2807/aether"
+Repository = "https://github.com/ansh2807/aether"
+Changelog = "https://github.com/ansh2807/aether/blob/main/CHANGELOG.md"
+Documentation = "https://github.com/ansh2807/aether/blob/main/docs/DURABILITY.md"
+Issues = "https://github.com/ansh2807/aether/issues"

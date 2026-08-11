@@ -64,7 +64,13 @@ COMMANDS: list[SlashCommand] = [
     ),
     SlashCommand(
         "/setup", "Re-run the wizard: pick platforms and models", MODELS,
-        aliases=("/models", "/reconfigure"),
+        aliases=("/reconfigure",),
+    ),
+    SlashCommand(
+        "/models", "Every provider AETHER can connect to, and which are ready here",
+        MODELS, args="[cli|api|local|aggregator]",
+        example="/models cli",
+        aliases=("/catalog",),
     ),
     SlashCommand(
         "/connect", "Sign in to a provider (browser OAuth or API key)",
