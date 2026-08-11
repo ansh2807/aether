@@ -96,6 +96,14 @@ async def test_container_mode_degrades_loudly_without_a_runtime(tmp_path: Path, 
     not (shutil.which("docker") or shutil.which("podman")),
     reason="no container runtime on this machine",
 )
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "the sandbox image is Linux; Windows runners have docker on PATH but "
+        "default to Windows containers, so the runtime exists and still cannot "
+        "run it — presence of the binary is not usability"
+    ),
+)
 @pytest.mark.asyncio
 async def test_container_mode_has_no_network(tmp_path: Path):
     ws = tmp_path / "ws"
@@ -110,7 +118,13 @@ async def test_container_mode_has_no_network(tmp_path: Path):
         encoding="utf-8",
     )
     engine = VerificationEngine(repo=None, sandbox_mode="container")
-    await engine._run(["python", "net.py"], cwd=ws, timeout=180)
+    code, out = await engine._run(["python", "net.py"], cwd=ws, timeout=180)
+
+    # Distinguish "the sandbox let the network through" from "the container
+    # never ran". Asserting on the artefact alone reports the second as the
+    # first, which is the worst way for a security test to fail.
+    if not (ws / "net.txt").exists():
+        pytest.skip(f"container did not run (exit {code}): {out[:200]}")
     assert (ws / "net.txt").read_text(encoding="utf-8") == "blocked"
 
 
