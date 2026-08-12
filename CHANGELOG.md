@@ -2,7 +2,9 @@
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.1.0] — 2026-08-12
+
+First release. AETHER runs a task to completion across a pool of models and keeps the work when one of them dies.
 
 ### Security — production hardening
 

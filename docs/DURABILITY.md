@@ -35,7 +35,7 @@ pytest tests/test_durability.py tests/test_retry.py tests/test_export_resume.py 
 | Verified code tries to read your API keys | ✅ | container verification is the default; the explicit subprocess mode gets an allowlist environment, not yours | `test_secrets_are_not_visible_to_verified_code`, `test_container_mode_fails_closed_without_a_runtime` |
 | Unsourced research claims "done" | ✅ | research output must cite sources and address the question, or verification fails | `test_unsourced_research_fails_verification`, `test_research_that_ignores_the_question_is_flagged` |
 | A provider fails and the mock is available | ✅ | the mock is **not** routable while a real provider is enabled, so a fabricated success can never stand in for a real failure | `test_mock_not_routable_when_real_provider_configured` |
-| Corrupt state file on disk | ✅ | treated as empty and rewritten rather than crashing the run | `test_store_survives_corrupt_file` |
+| Corrupt state file on disk | ✅ | **fails closed** with `StateCorruptionError` rather than being treated as empty and rewritten. Silently starting from scratch would discard pending approvals, budgets and quota counters, and look like a clean start | `test_store_fails_closed_on_corrupt_file` |
 
 ---
 
