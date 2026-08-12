@@ -44,6 +44,86 @@ config (the bundled mock agent, so you can try the whole lifecycle with no keys)
 Point it at real providers and the same lifecycle runs across them, with
 routing and failover between agents instead of one mock.
 
+## What it does
+
+<table>
+<tr>
+<td width="50%" valign="top">
+
+**🛟 Survives what kills other agents**
+
+A task outlives the process that started it. Kill it mid-flight and a fresh
+orchestrator resumes from the last checkpoint — on a different model if needed.
+
+`python scripts/demo_failover.py`
+
+</td>
+<td width="50%" valign="top">
+
+**🏢 A company, not a chatbot**
+
+Staff a roster of named specialists onto your models. The plan decomposes the
+goal, assigns each subtask, and **stops for your approval**.
+
+`aether agentic plan "..."`
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+**🔌 Drop into tools you already use**
+
+An OpenAI-compatible endpoint. Point Cursor, Cline, Aider or the `openai` SDK
+at it and they inherit AETHER's failover and budgets.
+
+`base_url="http://127.0.0.1:7420/v1"`
+
+</td>
+<td width="50%" valign="top">
+
+**💸 Runs on free models**
+
+GLM-4.5-Flash, Groq, Gemini Flash, or Ollama locally. Thirty-plus providers,
+all disabled until you connect one.
+
+`aether models --free`
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+**🔍 Verifies instead of trusting**
+
+"The agent said done" is not evidence. Artifacts are checked before a task can
+reach `COMPLETED`, and the code runs with a scrubbed environment.
+
+</td>
+<td width="50%" valign="top">
+
+**🎯 Refuses rather than faking**
+
+Media work only routes to models that can produce media. No provider claims a
+capability AETHER cannot actually invoke.
+
+</td>
+</tr>
+</table>
+
+### Jump to
+
+[Quick start](#quick-start) ·
+[Agentic view](#agentic-view--staff-a-company-onto-your-models) ·
+[OpenAI endpoint](#use-aether-from-tools-that-speak-openai) ·
+[Providers](#providers--aether-models) ·
+[Docker](#run-it-in-docker) ·
+[What survives what](docs/DURABILITY.md) ·
+[Roadmap](docs/ROADMAP.md) ·
+[Contributing](CONTRIBUTING.md)
+
+---
+
 ## What it is
 
 **Two surfaces over one control plane.**
@@ -73,7 +153,7 @@ consensus step, and no agent can mark work complete on its own say-so.
 
 Providers plug in behind one `AgentAdapter` interface — around thirty ship in
 the config across agent CLIs, hosted APIs, aggregators and local runtimes (see
-[`aether models`](#finding-a-provider--aether-models)). Adding one is usually
+[`aether models`](#providers--aether-models)). Adding one is usually
 config alone; a genuinely new protocol is an adapter plus capability scores,
 with no orchestrator changes.
 
@@ -258,7 +338,7 @@ providers:
 AETHER **never** converts subscriptions into APIs or scrapes credentials into task memory.  
 CLI adapters use subprocess + existing machine auth only.
 
-### Agentic view — staff a company onto your models
+## Agentic view — staff a company onto your models
 
 AETHER already separates the **role** a piece of work needs from the
 **provider** that runs it. A roster adds the layer between: the **persona** — a
@@ -304,7 +384,7 @@ exactly why the plan is shown rather than acted on.
 > planning, the fallback emits "Plan approach / Implement / Verify", which names
 > no domain — the CLI says so rather than letting the output look broken.
 
-### Use AETHER from tools that speak OpenAI
+## Use AETHER from tools that speak OpenAI
 
 `aether serve` exposes an OpenAI-compatible endpoint, so Cursor, Cline, Aider,
 Continue, the `openai` SDK — anything that takes a `base_url` — can route
@@ -334,7 +414,7 @@ visible rather than hidden; `X-Aether-Failovers` counts them.
 > process. `stream=true` is not supported yet and returns an explicit 400
 > rather than a malformed stream.
 
-### Run it in Docker
+## Run it in Docker
 
 ```bash
 docker build -t aether .
@@ -345,7 +425,7 @@ Agent-CLI providers need binaries authenticated on a real machine, so a
 container is an API-provider deployment — `aether models` will show every CLI
 as not ready, which is the truth rather than a packaging fault.
 
-### Finding a provider — `aether models`
+## Providers — `aether models`
 
 You do not have to read the config to learn what plugs in. `aether models`
 lists everything AETHER knows how to connect and marks what this machine can
