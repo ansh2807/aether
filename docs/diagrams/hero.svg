@@ -1,0 +1,107 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 340" width="1200" height="340" role="img" aria-label="AETHER: a task running on one model, the model dies, and the task resumes on another and completes.">
+  <title>AETHER — the task survives when the model does not</title>
+  <desc>A task is checkpointed while running on the first model. That model fails. The orchestrator resumes the task from the checkpoint on a second model, which completes it.</desc>
+
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0d1117"/>
+      <stop offset="55%" stop-color="#11161f"/>
+      <stop offset="100%" stop-color="#0b1a2b"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#38bdf8"/>
+      <stop offset="100%" stop-color="#818cf8"/>
+    </linearGradient>
+    <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="4" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <rect width="1200" height="340" rx="16" fill="url(#bg)"/>
+  <!-- faint grid: structure, not decoration -->
+  <g stroke="#7dd3fc" stroke-opacity="0.05">
+    <path d="M0 85h1200M0 170h1200M0 255h1200"/>
+    <path d="M200 0v340M400 0v340M600 0v340M800 0v340M1000 0v340"/>
+  </g>
+
+  <text x="60" y="74" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="34" font-weight="700" fill="#e6edf3">
+    ⟁ AETHER
+  </text>
+  <text x="60" y="104" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="16" fill="#7d8590">
+    the task survives when the model does not
+  </text>
+
+  <!-- ── the rail the work travels along ───────────────────────────── -->
+  <line x1="150" y1="200" x2="1050" y2="200" stroke="#30363d" stroke-width="2"/>
+
+  <!-- checkpoints: the reason any of this works -->
+  <g fill="#30363d">
+    <circle cx="330" cy="200" r="5"/><circle cx="500" cy="200" r="5"/>
+    <circle cx="700" cy="200" r="5"/><circle cx="870" cy="200" r="5"/>
+  </g>
+
+  <!-- progress: advances, stalls at the failure, then resumes -->
+  <line x1="150" y1="200" x2="150" y2="200" stroke="url(#accent)" stroke-width="4" stroke-linecap="round">
+    <animate attributeName="x2"
+             values="150; 500; 500; 500; 1050; 1050"
+             keyTimes="0; 0.32; 0.42; 0.52; 0.86; 1"
+             dur="7s" repeatCount="indefinite"/>
+  </line>
+
+  <!-- ── model A: takes the work, then dies ────────────────────────── -->
+  <g>
+    <rect x="230" y="130" width="180" height="56" rx="10" fill="#161b22" stroke="#238636" stroke-width="2">
+      <animate attributeName="stroke" values="#238636;#238636;#f85149;#f85149;#30363d;#30363d;#238636"
+               keyTimes="0;0.34;0.42;0.55;0.62;0.97;1" dur="7s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="1;1;1;0.45;0.45;1"
+               keyTimes="0;0.34;0.45;0.6;0.97;1" dur="7s" repeatCount="indefinite"/>
+    </rect>
+    <text x="320" y="164" text-anchor="middle" font-family="ui-monospace,monospace" font-size="15" fill="#e6edf3">model A</text>
+    <text x="320" y="112" text-anchor="middle" font-family="ui-monospace,monospace" font-size="13" fill="#f85149" opacity="0">
+      rate limited
+      <animate attributeName="opacity" values="0;0;1;1;0;0" keyTimes="0;0.36;0.43;0.56;0.62;1" dur="7s" repeatCount="indefinite"/>
+    </text>
+  </g>
+
+  <!-- ── model B: picks it up from the checkpoint ──────────────────── -->
+  <g>
+    <rect x="790" y="130" width="180" height="56" rx="10" fill="#161b22" stroke="#30363d" stroke-width="2">
+      <animate attributeName="stroke" values="#30363d;#30363d;#238636;#238636;#30363d"
+               keyTimes="0;0.55;0.66;0.95;1" dur="7s" repeatCount="indefinite"/>
+    </rect>
+    <text x="880" y="164" text-anchor="middle" font-family="ui-monospace,monospace" font-size="15" fill="#e6edf3">model B</text>
+    <text x="880" y="112" text-anchor="middle" font-family="ui-monospace,monospace" font-size="13" fill="#3fb950" opacity="0">
+      resumed from checkpoint
+      <animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.56;0.66;0.92;1" dur="7s" repeatCount="indefinite"/>
+    </text>
+  </g>
+
+  <!-- the work itself: never restarts, only moves -->
+  <circle r="7" fill="#58a6ff" filter="url(#glow)">
+    <animate attributeName="cx" values="150;500;500;500;880;1050;1050"
+             keyTimes="0;0.32;0.42;0.55;0.7;0.9;1" dur="7s" repeatCount="indefinite"/>
+    <animate attributeName="cy" values="200;200;200;200;200;200;200" dur="7s" repeatCount="indefinite"/>
+    <animate attributeName="opacity" values="1;1;0.3;0.3;1;1;1"
+             keyTimes="0;0.4;0.45;0.55;0.62;0.9;1" dur="7s" repeatCount="indefinite"/>
+  </circle>
+
+  <text x="150" y="238" font-family="ui-monospace,monospace" font-size="12" fill="#7d8590">task starts</text>
+  <text x="466" y="238" font-family="ui-monospace,monospace" font-size="12" fill="#7d8590">checkpoint</text>
+  <text x="1004" y="238" text-anchor="end" font-family="ui-monospace,monospace" font-size="12" fill="#3fb950">completed</text>
+
+  <!-- ── what it actually ships ────────────────────────────────────── -->
+  <g font-family="ui-monospace,monospace" font-size="13" fill="#7d8590">
+    <text x="60" y="296">30+ providers</text>
+    <text x="215" y="296" fill="#30363d">·</text>
+    <text x="235" y="296">free models</text>
+    <text x="368" y="296" fill="#30363d">·</text>
+    <text x="388" y="296">OpenAI-compatible endpoint</text>
+    <text x="655" y="296" fill="#30363d">·</text>
+    <text x="675" y="296">271 specialists</text>
+    <text x="825" y="296" fill="#30363d">·</text>
+    <text x="845" y="296">verification gate</text>
+    <text x="1000" y="296" fill="#30363d">·</text>
+    <text x="1020" y="296" fill="#3fb950">393 tests</text>
+  </g>
+</svg>

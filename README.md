@@ -1,6 +1,6 @@
 <div align="center">
 
-# ⟁ AETHER
+<img src="docs/diagrams/hero.svg" width="100%" alt="AETHER — a task runs on one model, that model rate-limits, and the task resumes from its checkpoint on another and completes."/>
 
 **A deterministic orchestrator for multi-agent AI work.**
 
@@ -8,9 +8,11 @@ One control plane owns task state, routing, structured handoffs, failover and
 verification. Models are pluggable adapters — not the thing in charge.
 
 [![CI](https://github.com/ansh2807/aether/actions/workflows/ci.yml/badge.svg)](https://github.com/ansh2807/aether/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/badge/release-v0.1.0-blue.svg)](https://github.com/ansh2807/aether/releases/tag/v0.1.0)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache--2.0-green.svg)](LICENSE)
 [![Tests](https://img.shields.io/badge/tests-393-brightgreen.svg)](tests/)
+[![Durability](https://img.shields.io/badge/durability-every%20claim%20cites%20a%20test-8b5cf6.svg)](docs/DURABILITY.md)
 
 </div>
 

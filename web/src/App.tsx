@@ -1,4 +1,8 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
+
+// three.js is ~470KB. Split it out so it loads when the panel renders rather
+// than blocking the dashboard's first paint on a visualisation.
+const ProviderGlobe = lazy(() => import("./ProviderGlobe"));
 
 type Task = {
   task_id: string;
@@ -982,6 +986,21 @@ export default function App() {
         <div className="stack">
           <section className="card">
             <h2>Provider Health</h2>
+            {health.length > 0 && (
+              <Suspense fallback={<div style={{ height: 260 }} />}>
+                <ProviderGlobe
+                providers={health.map((h) => ({
+                  id: h.provider_id,
+                  available: h.available,
+                  disabled: h.availability.includes("DISABLED"),
+                  // No inflight yet: /api/agents/health does not report
+                  // per-provider load. Left unset rather than derived from
+                  // something that only looks like it — a node sized by a
+                  // guess is worse than one sized by nothing.
+                  }))}
+                />
+              </Suspense>
+            )}
             {health.length === 0 && <div className="empty">No providers reported</div>}
             {health.map((h) => (
               <div className="provider-row" key={h.provider_id}>
