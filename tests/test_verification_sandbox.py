@@ -213,6 +213,10 @@ async def test_container_mode_is_hardened(tmp_path: Path):
     not _linux_container_runtime_available(),
     reason="no running Linux container engine on this machine",
 )
+@pytest.mark.skipif(
+    not _container_image_available(CONTAINER_IMAGE),
+    reason=f"{CONTAINER_IMAGE} is not built on this machine",
+)
 @pytest.mark.asyncio
 async def test_container_timeout_removes_the_container(tmp_path: Path):
     runtime = shutil.which("docker") or shutil.which("podman")

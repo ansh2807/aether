@@ -29,7 +29,7 @@ LABEL org.opencontainers.image.title="AETHER" \
 RUN apk add --no-cache git
 
 WORKDIR /app
-COPY pyproject.toml README.md LICENSE ./
+COPY pyproject.toml hatch_build.py README.md LICENSE ./
 COPY src/ ./src/
 COPY config/ ./config/
 COPY --from=dashboard /web/dist ./web/dist
