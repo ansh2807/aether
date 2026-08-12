@@ -572,6 +572,71 @@ def agentic_board(
     _run(_go())
 
 
+@app.command("skills")
+def skills_cmd(
+    path: Optional[str] = typer.Option(None, "--path", "-p", help="A skill library directory"),
+    search: Optional[str] = typer.Option(None, "--search", "-s"),
+    show: Optional[str] = typer.Option(None, "--show", help="Print one skill's instructions"),
+) -> None:
+    """Skills AETHER can apply — its own, plus any library you point it at.
+
+    Nothing external loads unless you pass --path. Offensive skills inside a
+    loaded library are listed and readable, but are never applied to a task
+    automatically.
+    """
+    from aether.skills.catalog import DEFENSIVE, DUAL_USE, OFFENSIVE, SkillCatalog
+
+    console.print("[value]secure-code-review[/] "
+                  "[muted]built in " + DASH + " defensive " + DASH + " gates verification[/]")
+
+    if not path:
+        console.print("\n[muted]Load a library:[/] [accent]aether skills --path <dir>[/]")
+        console.print("[muted]e.g. github.com/mukul975/Anthropic-Cybersecurity-Skills[/]")
+        return
+
+    catalog = SkillCatalog.discover(path)
+    if catalog is None:
+        console.print(f"[err]No SKILL.md files under[/] {path}")
+        raise typer.Exit(1)
+
+    if show:
+        skill = catalog.get(show)
+        if skill is None:
+            console.print(f"[err]No skill named[/] {show}")
+            raise typer.Exit(1)
+        console.print(Panel(f"[heading]{skill.name}[/]\n[muted]{skill.description}[/]",
+                            border_style="accent", padding=(0, 2)))
+        console.print(skill.body())
+        return
+
+    if search:
+        table = data_table("Skill", "Domain", "Posture", "What it does",
+                           title=f"Matches for '{search}'")
+        for skill in catalog.search(search):
+            table.add_row(f"[value]{skill.name}[/]", f"[muted]{skill.domain}[/]",
+                          skill.posture, f"[muted]{truncate(skill.description, 52)}[/]")
+        console.print(table)
+        return
+
+    counts = catalog.posture_counts()
+    table = data_table("Domain", {"header": "Skills", "justify": "right"},
+                       title=f"{len(catalog)} skills loaded from {catalog.root.name}")
+    for domain, n in list(catalog.domains().items())[:16]:
+        table.add_row(f"[value]{domain}[/]", str(n))
+    console.print(table)
+
+    console.print()
+    console.print(f"  [ok]{counts.get(DEFENSIVE, 0)} defensive[/] "
+                  f"[muted]{DASH} may be applied automatically[/]")
+    console.print(f"  [muted]{counts.get(DUAL_USE, 0)} dual-use {DASH} listed, never automatic[/]")
+    console.print(f"  [warn]{counts.get(OFFENSIVE, 0)} offensive[/] "
+                  f"[muted]{DASH} listed, never automatic[/]")
+    console.print()
+    console.print("[muted]Offensive and unlabelled skills stay searchable and readable, but the")
+    console.print("orchestrator never reaches for them on its own. Use them deliberately, and")
+    console.print("only against systems you are authorised to test.[/]")
+
+
 @app.command("models")
 def models_cmd(
     kind: Optional[str] = typer.Option(
