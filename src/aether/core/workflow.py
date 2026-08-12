@@ -46,15 +46,24 @@ class WorkflowEngine:
         eligible for LLM planning; those modes have fixed, deliberately
         structured shapes and keep using the deterministic planner.
         """
+        from aether.core.modality import tag_modalities
         from aether.core.planner import LLMPlanner
 
         if task.mode != TaskMode.SOLO:
             from aether.core.planner import PlanResult
 
-            return PlanResult(self.plan(task), source="keyword", reason=f"mode={task.mode.value} is not LLM-planned")
+            result = PlanResult(self.plan(task), source="keyword",
+                                reason=f"mode={task.mode.value} is not LLM-planned")
+        else:
+            planner = LLMPlanner(settings)
+            result = await planner.plan_task(task, adapter, self.plan)
 
-        planner = LLMPlanner(settings)
-        return await planner.plan_task(task, adapter, self.plan)
+        # One pass over whichever planner produced the plan. A subtask that has
+        # to hand back an image or a video must be gated the same way however
+        # it was planned — otherwise the LLM path and the fallback would
+        # disagree about whether media routing applies.
+        tag_modalities(result.subtasks)
+        return result
 
     def _plan_solo(self, task: Task) -> list[Subtask]:
         prompt = task.original_prompt.lower()

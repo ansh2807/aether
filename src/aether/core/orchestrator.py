@@ -842,12 +842,18 @@ class Orchestrator:
                 )
                 agent_dir = str(worktree)
 
+            # The router already gated on these; the adapter needs them to
+            # pick its endpoint. Without this the image provider would be
+            # selected correctly and then asked for text anyway.
+            from aether.core.modality import MEDIA_CAPABILITIES
+            media = sorted(MEDIA_CAPABILITIES & set(sub.required_capabilities))
             req = ExecutionRequest(
                 task_id=task_id,
                 subtask_id=sub.subtask_id,
                 provider_id=provider_id,
                 role=sub.role,
                 prompt=prompt,
+                metadata={"modalities": media} if media else {},
                 context_package=pkg.model_dump(mode="json"),
                 workspace_path=agent_dir,
                 timeout_seconds=self.settings.orchestrator.agent_timeout_seconds,

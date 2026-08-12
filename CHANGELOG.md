@@ -6,6 +6,31 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Hardening pass over the orchestrator, control-plane state, local API and CLI.
 
+### Added — modality routing: media work no longer goes to text models
+
+- **The bug.** Every capability dimension was text-work, so "generate a
+  10-second promo video" scored as *coding* and went to whichever model writes
+  the best Python — which returned a confident paragraph describing a video.
+  A plausible wrong answer is the worst failure this project recognises.
+- **Modality is a gate, not a weight.** A subtask requiring `image`, `video` or
+  `audio` may only route to a provider declaring it. Scoring it softly would let
+  a text model win on capability and hand back prose. The mock is not exempt —
+  fabricating an image is the same lie as fabricating a success.
+- **A provider declares a modality only when AETHER can invoke it.** Gemini can
+  generate video; AETHER cannot ask it to, so Gemini does not claim `video`. A
+  test enforces this across the whole catalogue.
+- **Image generation is real**, via `/images/generations` — the one media
+  endpoint with a common shape across OpenAI-compatible servers. The image is
+  written to the workspace as an artifact, so verification checks a file rather
+  than a claim. `openai` and `omniroute` declare it.
+- **Video and audio fail loudly** with a reason that names what is missing and
+  what would otherwise go wrong, because "no available agents" reads as "try
+  later" when the condition is permanent.
+- Detection is deterministic and deliberately conservative: it needs a produce
+  verb next to a media noun, and phrases like "fix the video player" or "add
+  image upload" are explicitly excluded — those are coding tasks that merely
+  contain the word.
+
 ### Added — per-agent memory across tasks
 
 - **Specialists now remember their earlier work.** `TaskMemory` is scoped to one

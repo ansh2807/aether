@@ -72,7 +72,7 @@ API_PROVIDERS: list[MarketProvider] = [
         "GPT models direct from OpenAI",
         base_url="https://api.openai.com/v1", api_key_env="OPENAI_API_KEY",
         default_model="gpt-4o", key_url="https://platform.openai.com/api-keys",
-        context_window=128_000, capabilities=dict(FRONTIER),
+        context_window=128_000, capabilities={**FRONTIER, "image": 8},
         roles_preferred=("architect", "reviewer", "implementer"),
     ),
     MarketProvider(
@@ -211,7 +211,7 @@ AGGREGATORS: list[MarketProvider] = [
         "lot as one provider",
         base_url="http://127.0.0.1:8080/v1", api_key_env="OMNIROUTE_API_KEY",
         default_model="auto", key_url="https://github.com/diegosouzapw/OmniRoute",
-        context_window=128_000, capabilities=dict(FRONTIER),
+        context_window=128_000, capabilities={**FRONTIER, "image": 8},
         roles_preferred=("implementer", "researcher"),
         note="Breadth via a gateway you run: its provider terms are its own to honour, not ours to restate.",
         cost="free_tier",

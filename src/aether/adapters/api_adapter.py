@@ -131,6 +131,118 @@ class ApiAgentAdapter(BaseAdapter):
                 checked_at=utcnow(),
             )
 
+    async def _generate_image(self, request: ExecutionRequest, start: float) -> ExecutionResult:
+        """Produce an actual image via the OpenAI-compatible images endpoint.
+
+        This is what makes image modality real rather than declared. Without
+        it, routing a "generate a logo" subtask to a provider marked
+        image-capable would still return a paragraph describing a logo — the
+        gate in the router would be enforcing a promise nothing kept.
+
+        `/images/generations` is the one media endpoint with a common shape
+        across OpenAI-compatible servers. Video and audio have no equivalent,
+        which is why they stay unserved and fail loudly instead.
+        """
+        await self.initialize()
+        assert self._client is not None
+        key = self._api_key()
+        url = self.config.base_url.rstrip("/") + "/images/generations"
+        model = (self.config.extra or {}).get("image_model") or "gpt-image-1"
+
+        try:
+            resp = await self._client.post(
+                url,
+                json={"model": model, "prompt": request.prompt[:4000], "n": 1},
+                headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+                timeout=request.timeout_seconds,
+            )
+        except httpx.TimeoutException:
+            self._record_failure()
+            return ExecutionResult(
+                execution_id=request.execution_id, provider_id=self.provider_id,
+                success=False, error="image generation timed out",
+                failure_class=FailureClass.TIMEOUT,
+                latency_ms=(time.perf_counter() - start) * 1000,
+            )
+        except httpx.HTTPError as exc:
+            self._record_failure()
+            return ExecutionResult(
+                execution_id=request.execution_id, provider_id=self.provider_id,
+                success=False, error=str(exc), failure_class=FailureClass.NETWORK,
+                latency_ms=(time.perf_counter() - start) * 1000,
+            )
+
+        if resp.status_code >= 400:
+            return self._error_result(request, resp.status_code, resp.text, start)
+
+        try:
+            item = resp.json()["data"][0]
+        except (ValueError, KeyError, IndexError) as exc:
+            self._record_failure()
+            return ExecutionResult(
+                execution_id=request.execution_id, provider_id=self.provider_id,
+                success=False, error=f"unreadable image response: {exc}",
+                failure_class=FailureClass.INVALID_RESPONSE,
+                latency_ms=(time.perf_counter() - start) * 1000,
+            )
+
+        # The artifact has to land on disk. An image returned only in the
+        # response body would vanish with the process, and verification checks
+        # artifacts rather than claims.
+        path = await self._save_image(item, request)
+        if path is None:
+            self._record_failure()
+            return ExecutionResult(
+                execution_id=request.execution_id, provider_id=self.provider_id,
+                success=False, error="image returned but could not be saved",
+                failure_class=FailureClass.INVALID_RESPONSE,
+                latency_ms=(time.perf_counter() - start) * 1000,
+            )
+
+        self._record_request(tokens=0)
+        return ExecutionResult(
+            execution_id=request.execution_id, provider_id=self.provider_id,
+            success=True,
+            # The handoff format the orchestrator parses, so a generated image
+            # completes its subtask like any other piece of work.
+            output=(
+                "STATUS: COMPLETE\n\nCOMPLETED:\n"
+                f"- generated image at {path.name}\n"
+            ),
+            artifacts=[str(path)],
+            latency_ms=(time.perf_counter() - start) * 1000,
+            raw={"model": model, "modality": "image"},
+        )
+
+    async def _save_image(self, item: dict, request: ExecutionRequest):
+        """Write a returned image to the workspace, base64 or URL."""
+        import base64
+        from pathlib import Path
+
+        workspace = Path(request.workspace_path or ".")
+        try:
+            workspace.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            return None
+        out = workspace / f"generated-{request.execution_id}.png"
+
+        if item.get("b64_json"):
+            try:
+                out.write_bytes(base64.b64decode(item["b64_json"]))
+                return out
+            except (ValueError, OSError):
+                return None
+
+        if item.get("url") and self._client is not None:
+            try:
+                got = await self._client.get(item["url"], timeout=60)
+                if got.status_code == 200:
+                    out.write_bytes(got.content)
+                    return out
+            except (httpx.HTTPError, OSError):
+                return None
+        return None
+
     async def execute(self, request: ExecutionRequest) -> ExecutionResult:
         """Retry NETWORK/TIMEOUT failures with backoff before returning.
 
@@ -138,6 +250,12 @@ class ApiAgentAdapter(BaseAdapter):
         retry-exhausted attempt still costs exactly one circuit-breaker
         failure, not one per try.
         """
+        # A subtask the router gated as needing an image goes to the images
+        # endpoint. Sending it to /chat/completions would return prose about
+        # an image, which is the exact failure the gate exists to prevent.
+        if "image" in (request.metadata or {}).get("modalities", []):
+            start = time.perf_counter()
+            return await self._generate_image(request, start)
         return await self._execute_with_retry(lambda: self._execute_once(request))
 
     def _error_result(

@@ -8,6 +8,7 @@ from typing import Optional
 from aether.adapters.registry import AgentRegistry
 from aether.config.settings import AetherSettings
 from aether.core.circuit import CircuitBreaker
+from aether.core.modality import MEDIA_CAPABILITIES, describe_gap
 from aether.core.quota import QuotaManager
 from aether.domain.enums import AgentRole, ProviderAvailability
 from aether.domain.models import HealthStatus, RouteDecision, Subtask, Task
@@ -54,6 +55,9 @@ class AgentRouter:
         self._health_cache: dict[str, tuple[float, HealthStatus]] = {}
         # provider_id -> subtasks currently executing on it
         self._inflight: dict[str, int] = {}
+        # Why the last select() returned None, when the reason is
+        # permanent (a modality nothing can serve) rather than transient.
+        self.last_failure_reason: str = ""
 
     # --- concurrent load ------------------------------------------------
     #
@@ -120,6 +124,12 @@ class AgentRouter:
 
         allow_testing = self.settings.routing.allow_testing_fallback or not self._has_real_provider()
 
+        # Modality is a gate, not a weight. A subtask that must produce an
+        # image or a video has to go to a provider that can actually produce
+        # one; scoring it softly would let a text model win on capability and
+        # hand back a paragraph describing the artifact. See core/modality.py.
+        required_media = MEDIA_CAPABILITIES & set(caps)
+
         candidates: list[tuple[str, float, list[str]]] = []
         for pid in self.registry.list_ids():
             if pid in exclude_set:
@@ -150,6 +160,14 @@ class AgentRouter:
                 continue
 
             profile = await adapter.get_capabilities()
+
+            # The gate. A provider that does not declare every required
+            # modality is not a candidate at any score, and the mock is not
+            # exempt — fabricating an image is the same lie as fabricating a
+            # success.
+            if required_media and not all(profile.score(m, 0) > 0 for m in required_media):
+                continue
+
             cap_score = profile.score(primary_cap, 0)
             for c in caps:
                 cap_score = max(cap_score, profile.score(c, 0))
@@ -210,7 +228,23 @@ class AgentRouter:
             candidates.append((pid, score, reasons))
 
         if not candidates:
-            log.warning("no_route_candidates", task_id=task.task_id, role=role.value)
+            # Distinguish "everyone is busy" from "nobody can do this at all".
+            # The second is a permanent condition and needs a different answer
+            # from the operator, so it must not look like the first.
+            if required_media:
+                gap = describe_gap(required_media) or (
+                    f"no enabled provider declares {', '.join(sorted(required_media))}"
+                )
+                log.warning(
+                    "no_route_for_modality",
+                    task_id=task.task_id,
+                    role=role.value,
+                    modalities=sorted(required_media),
+                )
+                self.last_failure_reason = gap
+            else:
+                log.warning("no_route_candidates", task_id=task.task_id, role=role.value)
+                self.last_failure_reason = ""
             return None
 
         candidates.sort(key=lambda x: x[1], reverse=True)
