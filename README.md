@@ -11,7 +11,7 @@ verification. Models are pluggable adapters — not the thing in charge.
 [![Release](https://img.shields.io/badge/release-v0.1.0-blue.svg)](https://github.com/ansh2807/aether/releases/tag/v0.1.0)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache--2.0-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-393-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-440-brightgreen.svg)](tests/)
 [![Durability](https://img.shields.io/badge/durability-every%20claim%20cites%20a%20test-8b5cf6.svg)](docs/DURABILITY.md)
 
 </div>

@@ -300,9 +300,16 @@ class ChatRouter:
             f"Mode: {session.mode}",
             "",
         ]
+        # The summary is written by a model compacting earlier turns, and the
+        # transcript below it contains model output too. Both are rendered
+        # inside this frame, so both are neutralised first — otherwise a reply
+        # containing "=== END RECENT ===" closes the frame and everything after
+        # it reads as the orchestrator speaking.
+        from aether.security.provenance import neutralize, safe_field
+
         if session.memory_summary or seg.summary_from_previous:
             parts.append("=== CONTINUITY SUMMARY (prior context compacted) ===")
-            parts.append(session.memory_summary or seg.summary_from_previous)
+            parts.append(neutralize(session.memory_summary or seg.summary_from_previous))
             parts.append("=== END SUMMARY — continue from here ===")
             parts.append("")
         # include recent messages in prompt for CLI/API adapters without native history
@@ -310,8 +317,8 @@ class ChatRouter:
         if recent:
             parts.append("=== RECENT MESSAGES ===")
             for m in recent:
-                who = m.provider_id or m.role
-                parts.append(f"{m.role.upper()}[{who}]: {m.content[:2000]}")
+                who = safe_field(m.provider_id or m.role)
+                parts.append(f"{m.role.upper()}[{who}]: {neutralize(m.content[:2000])}")
             parts.append("=== END RECENT ===")
             parts.append("")
         parts.append("USER:")

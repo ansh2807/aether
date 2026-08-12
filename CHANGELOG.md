@@ -40,6 +40,28 @@ First release. AETHER runs a task to completion across a pool of models and keep
 
 Hardening pass over the orchestrator, control-plane state, local API and CLI.
 
+### Added — prompt-injection guardrail: model output is data
+
+- **`aether.security.provenance`.** The context package is an instruction
+  frame, and four of its fields — `current_state`, `decisions`, `known_issues`,
+  `recommended_next_action` — are filled from a previous model's handoff.
+  Rendered flat, the previous agent was writing into the next agent's
+  instructions.
+- **The defence is structural, not a word list.** Untrusted text can no longer
+  reproduce the delimiters that open or close a block, so the frame cannot be
+  forged or escaped. Zero-width and bidi characters are stripped first, since
+  they are invisible to a reviewer checking by eye. Fields are length-bounded,
+  because burying a payload past where a reader stops is part of the same
+  family.
+- **Phrase detection reports, it never gates.** A model summarising a phishing
+  email it was asked to analyse legitimately contains "ignore previous
+  instructions"; dropping that would break the security work AETHER just grew a
+  skill for. Structure is the control — phrasing is an audit signal only.
+- **The same hole existed twice.** The chat session builds its own frame, with
+  compaction summaries and assistant turns rendered inside it. Found while
+  wiring the first fix, which is the argument for a shared module over a local
+  helper.
+
 ### Added — cyber skill: reviewing the code the agents wrote
 
 - **`aether.skills.cyber` — secure code review as a verification gate.**
