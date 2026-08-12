@@ -449,6 +449,24 @@ Real demand should pull these, not enthusiasm:
 - **Auto-approving destructive commands.** The approval gate is the point.
 - **Scraping subscription auth into API calls.** Non-negotiable.
 
+### Prior art, and what was taken from it
+
+Recorded so the lineage is visible rather than living in commit messages.
+
+- **[OmniRoute](https://github.com/diegosouzapw/OmniRoute)** — terminal vs
+  transient circuit states (WO-23), load-aware routing (WO-24), the
+  OpenAI-compatible endpoint, and the decision-observability fix. See below for
+  what was declined.
+- **[MiroFish](https://github.com/666ghj/MiroFish)** — its god's-eye view over a
+  running population became `aether agentic board`; its long-term per-agent
+  memory became `aether agentic memory`. Its central mechanism did not transfer:
+  MiroFish predicts by simulating thousands of interacting agents, while AETHER
+  divides real work across a few and gates it on verification. Still unbuilt
+  from it: *deep interaction*, asking one agent directly what it found.
+- **[Anthropic-Cybersecurity-Skills](https://github.com/mukul975/Anthropic-Cybersecurity-Skills)**
+  — the `SKILL.md` structure and framework mappings behind `skills/cyber`. Its
+  offensive third was deliberately not adopted.
+
 ### Considered from OmniRoute and declined
 
 Recorded so the decision does not get re-litigated, and so it can be revisited

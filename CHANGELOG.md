@@ -150,6 +150,7 @@ Hardening pass over the orchestrator, control-plane state, local API and CLI.
   work had no marketing home). Each has a regression test.
 - When the LLM planner is unavailable the CLI **says the plan is generic**
   rather than letting weak staffing look like a broken matcher.
+- Two ideas came from [MiroFish](https://github.com/666ghj/MiroFish): its god's-eye view over a running population became `agentic board`, and its long-term per-agent memory became `agentic memory`. Its core mechanism did not transfer — MiroFish predicts outcomes by letting thousands of agents interact, where AETHER divides real work across a few and verifies the artifacts. Simulation and verification want opposite things.
 
 ### Added — free models are findable (`aether models --free`)
 
