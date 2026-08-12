@@ -262,7 +262,9 @@ class ChatRouter:
         ]
         real = sorted(cfg.provider_id for cfg in registered if cfg.enabled and not cfg.for_testing)
         testing = sorted(
-            cfg.provider_id for cfg in registered if cfg.for_testing and cfg.provider_id not in real
+            cfg.provider_id
+            for cfg in registered
+            if cfg.enabled and cfg.for_testing and cfg.provider_id not in real
         )
         # A fake agent must not quietly answer for a real one that hit a limit.
         allow_testing = (

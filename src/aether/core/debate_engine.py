@@ -24,8 +24,7 @@ class DebateEngine:
         ids: list[str] = []
         for cfg in self.app.registry.list_configs():
             if not cfg.enabled:
-                if not (cfg.for_testing and cfg.provider_id == "mock"):
-                    continue
+                continue
             if self.app.registry.get(cfg.provider_id):
                 ids.append(cfg.provider_id)
         # diversify: prefer unique families
@@ -50,7 +49,9 @@ class DebateEngine:
         agents = providers or self._debate_providers()
         if len(agents) < 2:
             # pad with mock if only one real
-            if "mock" in [c.provider_id for c in self.app.registry.list_configs()]:
+            if "mock" in [
+                c.provider_id for c in self.app.registry.list_configs() if c.enabled
+            ]:
                 if "mock" not in agents:
                     agents.append("mock")
         if not agents:

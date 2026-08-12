@@ -122,7 +122,7 @@ class AgentRouter:
         caps = list(required_capabilities or (subtask.required_capabilities if subtask else ["reasoning"]))
         primary_cap = ROLE_CAPABILITY.get(role, caps[0] if caps else "reasoning")
 
-        allow_testing = self.settings.routing.allow_testing_fallback or not self._has_real_provider()
+        has_real_provider = self._has_real_provider()
 
         # Modality is a gate, not a weight. A subtask that must produce an
         # image or a video has to go to a provider that can actually produce
@@ -137,10 +137,14 @@ class AgentRouter:
             cfg = self.registry.get_config(pid)
             if cfg is None:
                 continue
-            if cfg.for_testing and not allow_testing:
-                # never let a fake agent absorb work a real provider failed at
+            if not cfg.enabled:
                 continue
-            if not cfg.enabled and not cfg.for_testing:
+            if (
+                cfg.for_testing
+                and has_real_provider
+                and not self.settings.routing.allow_testing_fallback
+            ):
+                # never let a fake agent absorb work a real provider failed at
                 continue
             if not self.circuit.allow(pid):
                 continue

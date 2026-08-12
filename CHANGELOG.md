@@ -4,7 +4,79 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Security — production hardening
+
+- Verification now defaults to container isolation and fails closed when the
+  requested runtime is unavailable. Host subprocess fallback requires explicit
+  opt-in, and verification rejects workspace symlinks.
+- Verification containers now use an image built from pinned inputs, an
+  unprivileged UID, zero Linux capabilities, no-new-privileges, disabled
+  networking and IPC, bounded CPU/memory/swap/pids/files, and forced timeout
+  cleanup. Registry-hosted custom images can be locked to an immutable digest.
+- The supported local verifier image now carries exact, hash-checked pytest
+  tooling, so the safe default can execute tests without network access.
+- Dashboard bootstrap credentials now travel in a URL fragment, are exchanged
+  for a signed HttpOnly SameSite cookie, and are removed from browser history.
+  Ordinary HTTP query-token authentication is rejected; API docs are gated.
+- API responses add CSP, anti-framing, no-referrer and no-store headers, and
+  cookie-authenticated mutations enforce trusted origins.
+- Control-plane JSON state no longer continues after lock timeouts, corruption,
+  or failed atomic commits.
+- Wheels now include the default configuration and built dashboard, with a clean
+  install smoke test in CI. Vite was upgraded and `npm audit` is clean.
+- The supported Compose profile binds to loopback, persists only intended data,
+  uses a read-only root filesystem, drops capabilities, enables
+  no-new-privileges, and applies conservative resource limits.
+- Docker build stages and the default verification runtime are pinned by digest
+  rather than following mutable upstream tags.
+- The runtime image moved from Debian slim to Alpine, removing the Git/Perl
+  package chain that the container vulnerability scan flagged.
+- Live provider changes rebuild the active registry in place instead of leaking
+  a second application instance behind stale FastAPI route closures.
+- The mock provider is disabled by default. Simulation now requires the explicit
+  `aether run --demo ...` flag and prints a warning that no real work is occurring.
+
 Hardening pass over the orchestrator, control-plane state, local API and CLI.
+
+### Added — cyber skill: reviewing the code the agents wrote
+
+- **`aether.skills.cyber` — secure code review as a verification gate.**
+  Verification proved artifacts existed and Python parsed; neither notices that
+  `subprocess.run(cmd, shell=True)` compiles perfectly. "Verification before
+  trust" was only asking whether the work happened, never whether it was safe.
+- Fifteen detectors, each mapped to a CWE: secrets, shell/SQL/code injection,
+  unsafe deserialisation, XSS sinks, XXE, disabled TLS verification, weak
+  crypto, debug exposure. `HIGH` fails the task; the rest are reported.
+- **Deterministic first, model second.** The regex pass is offline and
+  reproducible and still runs when every provider is down. Only the judgement
+  calls — is that string actually attacker-controlled? — go to a model, through
+  the normal router, so it works with any provider. Silence from the model
+  never clears a finding: an unreachable provider must not read as a clean
+  bill of health.
+- **Defensive only, and pinned by a test** that inspects the module's imports:
+  no sockets, no HTTP clients, no remote scanning, no exploitation tooling.
+  AETHER is pointed at people's own repositories.
+- Structure borrowed from mukul975/Anthropic-Cybersecurity-Skills: `SKILL.md`
+  with YAML frontmatter and framework mappings. The offensive half of that
+  catalogue is deliberately not adopted.
+- **Dogfooding found the worst flaw immediately.** Its first run on AETHER
+  produced three findings, two of them in the scanner's own source — matching
+  its module docstring's example of `shell=True` and one of its own rule
+  regexes. Prose describing an insecure pattern is not an insecure pattern, and
+  a scanner that blocks a build on its own documentation is one people switch
+  off. Comments and docstrings are now skipped, the rules file excludes itself,
+  and a test asserts the scanner stays clean against AETHER's own source.
+- Suppressions apply to a whole comment block, not just the line. Found the
+  same way: AETHER's `PRAGMA busy_timeout` suppression is two comment lines
+  above the call, and both a same-line check and a one-line lookback ignored it.
+
+### Fixed — the verifier image failure named the wrong problem
+
+- Container mode with Docker present but `aether:local` unbuilt fell through to
+  Docker's own "Unable to find image … pull access denied", which reads like a
+  registry permissions problem and never mentions that the image is built
+  locally with one command. Now detected separately, with the build command in
+  the message.
 
 ### Added — modality routing: media work no longer goes to text models
 

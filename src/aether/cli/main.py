@@ -89,10 +89,20 @@ def _load_local_secrets() -> None:
     load_dotenv_file(Path.cwd() / ".env")
 
 
-async def _boot(config: Optional[str] = None) -> AetherApp:
+async def _boot(config: Optional[str] = None, *, demo: bool = False) -> AetherApp:
     _load_local_secrets()
     config = _resolve_config(config)
     application = get_app(config, force_reload=bool(config))
+    if demo:
+        mock = application.registry.get_config("mock")
+        if mock is None:
+            raise RuntimeError("Demo mode requires the bundled mock provider")
+        mock.enabled = True
+        application.settings.routing.allow_testing_fallback = True
+        console.print(
+            "[warn]DEMO MODE[/] [muted]The mock provider fabricates output; "
+            "results are not real work.[/]"
+        )
     await application.start()
     return application
 
@@ -179,9 +189,10 @@ def run_task(
     prompt: str = typer.Argument(..., help="Task goal"),
     mode: str = typer.Option("solo", "--mode", "-m"),
     config: Optional[str] = typer.Option(None, "--config", "-c"),
+    demo: bool = typer.Option(False, "--demo", help="Use simulated mock output"),
 ) -> None:
     """Shortcut: create and run a task (same as `aether task create`)."""
-    task_create(prompt=prompt, mode=mode, config=config, wait=True)
+    task_create(prompt=prompt, mode=mode, config=config, wait=True, demo=demo)
 
 
 @app.command("status")
@@ -733,7 +744,9 @@ def serve_cmd(
         from aether.api.server import dashboard_dir
 
         if dashboard_dir(application.settings) is not None:
-            dashboard = f"http://{h}:{p}/?token={token}"
+            # Fragments never reach HTTP access logs or referrer headers. The
+            # dashboard exchanges this bootstrap value for an HttpOnly cookie.
+            dashboard = f"http://{h}:{p}/#token={token}"
         else:
             dashboard = (
                 "not built [dim](cd web && npm install && npm run build, then restart)[/]"
@@ -804,11 +817,12 @@ def task_create(
     mode: str = typer.Option("solo", "--mode", "-m"),
     config: Optional[str] = typer.Option(None, "--config", "-c"),
     wait: bool = typer.Option(True, "--wait/--no-wait"),
+    demo: bool = typer.Option(False, "--demo", help="Use simulated mock output"),
 ) -> None:
     """Create and start a task."""
 
     async def _go() -> None:
-        application = await _boot(config)
+        application = await _boot(config, demo=demo)
         try:
             m = TaskMode(mode)
         except ValueError:

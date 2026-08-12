@@ -16,6 +16,7 @@ server:
   # Token is generated into data/api_token and printed by `aether serve`.
   require_auth: true
   api_token: ""    # leave empty to use data/api_token or $AETHER_API_TOKEN
+  secure_cookies: false  # set true behind an HTTPS-terminating reverse proxy
 
 orchestrator:
   max_agent_retries: 3
@@ -54,6 +55,14 @@ quota:
 
 security:
   approval_level: safe
+  # Production default: execute agent-written tests only in an isolated
+  # container. Missing Docker/Podman fails verification instead of silently
+  # running untrusted code on the host.
+  verification_sandbox: container   # container | subprocess | off
+  verification_allow_fallback: false
+  # `docker compose build` creates this hash-pinned, scanned local image with
+  # pytest installed. Use a digest-pinned custom image for extra dependencies.
+  verification_image: aether:local
   secret_patterns:
     - "(?i)api[_-]?key\\s*[:=]\\s*['\"]?([\\w-]{16,})"
     - "(?i)authorization\\s*:\\s*bearer\\s+([\\w.-]+)"
@@ -102,7 +111,9 @@ providers:
   mock:
     display_name: Mock Agent
     adapter: mock
-    enabled: true
+    # Explicitly enable only for demos/tests. It fabricates output and must not
+    # make an unconfigured production install report successful work.
+    enabled: false
     for_testing: true
     context_window: 32000
     capabilities:

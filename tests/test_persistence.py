@@ -16,7 +16,7 @@ from aether.core.approvals import ApprovalManager, ApprovalStatus
 from aether.core.budget import BudgetManager
 from aether.core.metrics import MetricsCollector
 from aether.core.quota import QuotaManager
-from aether.core.state_store import JsonStateStore
+from aether.core.state_store import JsonStateStore, StateCorruptionError, StateLockTimeout
 from aether.domain.enums import ProviderAvailability
 from aether.domain.models import utcnow
 
@@ -28,13 +28,21 @@ def _store(tmp_path: Path, name: str) -> JsonStateStore:
 # --- JSON store ----------------------------------------------------------
 
 
-def test_store_survives_corrupt_file(tmp_path: Path):
+def test_store_fails_closed_on_corrupt_file(tmp_path: Path):
     store = _store(tmp_path, "x.json")
     store.save({"a": 1})
     store.path.write_text("{not json", encoding="utf-8")
-    assert store.load() == {}
-    store.save({"a": 2})
-    assert store.load() == {"a": 2}
+    with pytest.raises(StateCorruptionError):
+        store.load()
+
+
+def test_store_fails_closed_when_lock_times_out(tmp_path: Path, monkeypatch):
+    from aether.core import state_store
+
+    store = _store(tmp_path, "locked.json")
+    monkeypatch.setattr(state_store, "_acquire", lambda _handle: False)
+    with pytest.raises(StateLockTimeout), store.transaction(timeout=0.01):
+        pytest.fail("transaction body must not run without the lock")
 
 
 # --- #6 approvals across processes ---------------------------------------
@@ -157,9 +165,8 @@ def test_quota_cooldown_survives_restart(tmp_path: Path):
 def test_transaction_is_reentrant(tmp_path: Path):
     """A locked write path may call another locked helper without deadlocking."""
     store = _store(tmp_path, "reentrant.json")
-    with store.transaction():
-        with store.transaction():
-            store.save({"n": 1})
+    with store.transaction(), store.transaction():
+        store.save({"n": 1})
     assert store.load() == {"n": 1}
 
 

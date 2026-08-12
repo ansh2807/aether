@@ -1,0 +1,50 @@
+# Version-control and editor state
+.git/
+.github/
+.idea/
+.vscode/
+*.swp
+
+# Local runtimes, caches, tests, and build outputs
+.venv/
+venv/
+**/__pycache__/
+**/*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage*
+htmlcov/
+dist/
+build/
+tests/
+web/node_modules/
+web/dist/
+web/.vite/
+
+# Local AETHER state and workspaces
+data/
+workspace/
+worktrees/
+*.db
+*.sqlite
+*.sqlite3
+*.log
+
+# Credentials and machine-local configuration must never enter a build context
+.env
+.env.*
+**/.env
+**/.env.*
+!.env.example
+!**/.env.example
+config/aether.yaml
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+
+# Host-only artifacts
+.DS_Store
+Thumbs.db

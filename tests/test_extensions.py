@@ -13,7 +13,8 @@ from aether.core.budget import BudgetExceeded, BudgetManager
 from aether.core.event_bus import EventBus
 from aether.core.metrics import MetricsCollector
 from aether.core.workspace import WorkspaceManager
-from aether.domain.enums import TaskMode, TaskStatus
+from aether.domain.enums import AdapterType, TaskMode, TaskStatus
+from aether.domain.models import ProviderConfig
 
 
 @pytest.mark.asyncio
@@ -107,6 +108,20 @@ async def test_doctor(app: AetherApp):
 
 
 @pytest.mark.asyncio
+async def test_doctor_reports_missing_container_runtime(app: AetherApp, monkeypatch):
+    from aether.core.doctor import run_doctor
+
+    app.settings.security.verification_sandbox = "container"
+    monkeypatch.setattr(app.verification, "_container_runtime", lambda: None)
+
+    report = await run_doctor(app)
+
+    runtime = next(check for check in report["checks"] if check["name"] == "verification_runtime")
+    assert runtime["ok"] is False
+    assert runtime["severity"] == "error"
+
+
+@pytest.mark.asyncio
 async def test_budget_enforced_on_task(app: AetherApp):
     # tiny budget forces failure after first agent call(s)
     task = await app.orchestrator.submit(
@@ -136,3 +151,33 @@ def test_metrics_agent_stats():
     assert stats["success"] == 1
     assert stats["failure"] == 1
     assert stats["avg_latency_ms"] == 20.0
+
+
+@pytest.mark.asyncio
+async def test_live_provider_reconfiguration_keeps_the_active_app(app: AetherApp):
+    replacement = ProviderConfig(
+        provider_id="replacement_mock",
+        display_name="Replacement Mock",
+        adapter=AdapterType.MOCK,
+        enabled=True,
+        for_testing=True,
+        capabilities={"coding": 8},
+    )
+
+    await app.registry.reconfigure_providers({replacement.provider_id: replacement})
+
+    assert app.registry.get("replacement_mock") is not None
+    assert app.registry.get("mock") is None
+    assert set(app.settings.providers) == {"replacement_mock"}
+
+
+@pytest.mark.asyncio
+async def test_disabled_testing_providers_cannot_receive_work(app: AetherApp):
+    from aether.domain.models import Task
+
+    for cfg in app.registry.list_configs():
+        if cfg.for_testing:
+            cfg.enabled = False
+
+    decision = await app.router.select(Task(original_prompt="real work only"))
+    assert decision is None

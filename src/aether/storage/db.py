@@ -98,6 +98,8 @@ class Database:
                 # No-op for :memory: databases, which cannot use WAL — the
                 # pragma simply reports the mode it kept.
                 cursor.execute("PRAGMA journal_mode=WAL")
+                # aether: allow-insecure — PRAGMA cannot take a bound
+                # parameter, and timeout_ms is our own int constant.
                 cursor.execute(f"PRAGMA busy_timeout={timeout_ms}")
             finally:
                 cursor.close()

@@ -81,13 +81,10 @@ class BudgetManager:
     def _reload(self) -> None:
         if self.store is None:
             return
-        try:
-            self._budgets = {
-                task_id: TaskBudget.model_validate(item)
-                for task_id, item in (self.store.load().get("budgets") or {}).items()
-            }
-        except Exception:  # noqa: BLE001 - corrupt state must not break the run
-            pass
+        self._budgets = {
+            task_id: TaskBudget.model_validate(item)
+            for task_id, item in (self.store.load().get("budgets") or {}).items()
+        }
 
     def _flush(self) -> None:
         if self.store is None:

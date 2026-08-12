@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import shutil
 import sys
@@ -23,6 +24,54 @@ async def run_doctor(app: AetherApp) -> dict[str, Any]:
     add("data_dir", app.settings.data_dir.exists(), str(app.settings.data_dir))
     add("workspace_root", app.settings.workspace_root.exists(), str(app.settings.workspace_root))
 
+    if app.settings.security.verification_sandbox == "container":
+        runtime = app.verification._container_runtime()
+        if runtime is None:
+            add(
+                "verification_runtime",
+                False,
+                "Docker/Podman not found; container verification will fail closed",
+                "error",
+            )
+        else:
+            async def probe(*args: str) -> tuple[bool, str]:
+                process: asyncio.subprocess.Process | None = None
+                try:
+                    process = await asyncio.create_subprocess_exec(
+                        *args,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.STDOUT,
+                    )
+                    output, _ = await asyncio.wait_for(process.communicate(), timeout=10)
+                    detail = (output or b"").decode("utf-8", errors="replace").strip()
+                    return process.returncode == 0, detail[:240]
+                except TimeoutError:
+                    if process is not None and process.returncode is None:
+                        process.kill()
+                        await process.wait()
+                    return False, "probe timed out"
+                except OSError as exc:
+                    return False, str(exc)
+
+            runtime_ok, runtime_detail = await probe(runtime, "info")
+            add(
+                "verification_runtime",
+                runtime_ok,
+                runtime_detail if not runtime_ok else f"ready ({runtime})",
+                "error",
+            )
+            image = app.settings.security.verification_image
+            if runtime_ok:
+                image_ok, image_detail = await probe(runtime, "image", "inspect", image)
+            else:
+                image_ok, image_detail = False, "container runtime is not ready"
+            add(
+                "verification_image",
+                image_ok,
+                image if image_ok else f"{image} unavailable: {image_detail}",
+                "error",
+            )
+
     # DB
     try:
         await app.tasks.list(limit=1)  # probe: raises if the DB is unreachable
@@ -32,7 +81,7 @@ async def run_doctor(app: AetherApp) -> dict[str, Any]:
 
     # providers
     health = await app.registry.health_all()
-    enabled = [c for c in app.registry.list_configs() if c.enabled or c.for_testing]
+    enabled = [c for c in app.registry.list_configs() if c.enabled]
     online = [h for h in health if h.available]
     add(
         "providers",
@@ -176,7 +225,7 @@ async def run_durability_doctor(app: AetherApp) -> dict[str, Any]:
     capturing, buffering = [], []
     for provider_id in app.registry.list_ids():
         cfg = app.registry.get_config(provider_id)
-        if cfg is None or not (cfg.enabled or cfg.for_testing):
+        if cfg is None or not cfg.enabled:
             continue
         adapter = app.registry.get(provider_id)
         # CliAgentAdapter mirrors output as it arrives; the others buffer it

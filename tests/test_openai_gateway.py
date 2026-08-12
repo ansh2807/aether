@@ -23,7 +23,7 @@ from aether.api.server import create_fastapi_app
 @pytest.fixture
 def client(settings):
     settings.server.require_auth = True
-    settings.server.api_token = "test-token-123"
+    settings.server.api_token = "test-token-123456789012345678901234"
     from aether.app import AetherApp
 
     app = AetherApp(settings)
@@ -31,7 +31,7 @@ def client(settings):
         yield c
 
 
-AUTH = {"Authorization": "Bearer test-token-123"}
+AUTH = {"Authorization": "Bearer test-token-123456789012345678901234"}
 
 
 # --- the security property ----------------------------------------------

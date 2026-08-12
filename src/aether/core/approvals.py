@@ -69,16 +69,13 @@ class ApprovalManager:
         if self.store is None:
             return
         data = self.store.load()
-        try:
-            self._pending = {
-                item["approval_id"]: ApprovalRequest.model_validate(item)
-                for item in data.get("pending", [])
-            }
-            self._history = [
-                ApprovalRequest.model_validate(item) for item in data.get("history", [])
-            ]
-        except Exception:  # noqa: BLE001 - corrupt state must not break the run
-            pass
+        self._pending = {
+            item["approval_id"]: ApprovalRequest.model_validate(item)
+            for item in data.get("pending", [])
+        }
+        self._history = [
+            ApprovalRequest.model_validate(item) for item in data.get("history", [])
+        ]
 
     def _flush(self) -> None:
         if self.store is None:

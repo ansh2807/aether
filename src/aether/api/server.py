@@ -3,18 +3,29 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, AsyncIterator, Optional
+from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from aether import __version__
-from aether.api.auth import check_request, check_websocket, load_or_create_token
+from aether.api.auth import (
+    SESSION_COOKIE,
+    SESSION_MAX_AGE_SECONDS,
+    check_request,
+    check_websocket,
+    create_session_cookie,
+    extract_token,
+    load_or_create_token,
+    token_matches,
+    validate_token,
+)
 from aether.app import AetherApp
 from aether.core.doctor import run_doctor
 from aether.domain.enums import ApprovalLevel, TaskMode, TaskStatus
@@ -24,12 +35,12 @@ from aether.domain.models import utcnow
 class TaskCreateBody(BaseModel):
     prompt: str
     mode: TaskMode = TaskMode.SOLO
-    approval_level: Optional[ApprovalLevel] = None
+    approval_level: ApprovalLevel | None = None
     auto_start: bool = True
     priority: int = 50
-    max_tokens: Optional[int] = None
-    max_requests: Optional[int] = None
-    max_cost_usd: Optional[float] = None
+    max_tokens: int | None = None
+    max_requests: int | None = None
+    max_cost_usd: float | None = None
 
 
 class ApprovalBody(BaseModel):
@@ -48,7 +59,7 @@ class SandboxGrantBody(BaseModel):
 
 class ConnectBody(BaseModel):
     force: bool = False
-    api_key: Optional[str] = None
+    api_key: str | None = None
 
 
 class ApiKeyBody(BaseModel):
@@ -76,7 +87,7 @@ class OpenAIChatRequest(BaseModel):
 
 
 class ChatSessionCreate(BaseModel):
-    provider_id: Optional[str] = None
+    provider_id: str | None = None
     title: str = "AETHER chat"
     mode: str = "chat"
 
@@ -88,8 +99,8 @@ class ChatMessageBody(BaseModel):
 
 class DebateBody(BaseModel):
     topic: str = Field(..., min_length=1)
-    rounds: Optional[int] = None
-    session_id: Optional[str] = None
+    rounds: int | None = None
+    session_id: str | None = None
 
 
 def create_fastapi_app(application: AetherApp) -> FastAPI:
@@ -121,8 +132,9 @@ def create_fastapi_app(application: AetherApp) -> FastAPI:
     server_settings = application.settings.server
     api_token = ""
     if server_settings.require_auth:
-        api_token = server_settings.api_token or load_or_create_token(
-            Path(application.settings.data_dir)
+        api_token = validate_token(
+            server_settings.api_token
+            or load_or_create_token(Path(application.settings.data_dir))
         )
 
         @api.middleware("http")
@@ -131,7 +143,43 @@ def create_fastapi_app(application: AetherApp) -> FastAPI:
                 check_request(request, api_token)
             except HTTPException as exc:
                 return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
+            # Cookie authentication is convenient for the dashboard, but state
+            # changes must still come from this origin or an explicitly trusted
+            # development origin. Bearer/header clients are not subject to CSRF.
+            has_valid_header_token = token_matches(
+                api_token, extract_token(headers=dict(request.headers))
+            )
+            origin = request.headers.get("origin")
+            if (
+                request.method not in {"GET", "HEAD", "OPTIONS"}
+                and request.cookies.get(SESSION_COOKIE)
+                and not has_valid_header_token
+                and origin
+            ):
+                same_origin = f"{request.url.scheme}://{request.headers.get('host', '')}"
+                allowed = {same_origin, *server_settings.cors_origins}
+                if origin.rstrip("/") not in {item.rstrip("/") for item in allowed}:
+                    return JSONResponse({"detail": "Cross-origin cookie request rejected"}, 403)
             return await call_next(request)
+
+    @api.middleware("http")
+    async def _security_headers(request: Request, call_next):
+        response = await call_next(request)
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "no-referrer")
+        response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+        response.headers.setdefault(
+            "Content-Security-Policy",
+            "default-src 'self'; base-uri 'none'; frame-ancestors 'none'; "
+            "object-src 'none'; script-src 'self'; style-src 'self'; "
+            "img-src 'self' data:; connect-src 'self' ws: wss:",
+        )
+        if request.url.path.startswith(("/api/", "/v1/")):
+            response.headers.setdefault("Cache-Control", "no-store")
+        if request.url.scheme == "https":
+            response.headers.setdefault("Strict-Transport-Security", "max-age=31536000")
+        return response
 
     subscribers: list[WebSocket] = []
 
@@ -152,6 +200,21 @@ def create_fastapi_app(application: AetherApp) -> FastAPI:
     async def health() -> dict[str, Any]:
         return {"status": "ok", "version": __version__}
 
+    @api.post("/api/auth/session", status_code=204)
+    async def create_dashboard_session(request: Request) -> Response:
+        """Exchange the URL-fragment bootstrap token for an HttpOnly cookie."""
+        response = Response(status_code=204)
+        response.set_cookie(
+            SESSION_COOKIE,
+            create_session_cookie(api_token),
+            max_age=SESSION_MAX_AGE_SECONDS,
+            httponly=True,
+            secure=request.url.scheme == "https" or server_settings.secure_cookies,
+            samesite="strict",
+            path="/",
+        )
+        return response
+
     @api.get("/api/doctor")
     async def doctor() -> dict[str, Any]:
         return await run_doctor(application)
@@ -170,7 +233,7 @@ def create_fastapi_app(application: AetherApp) -> FastAPI:
         }
 
     @api.get("/api/events")
-    async def events(task_id: Optional[str] = None, type: Optional[str] = None, limit: int = 100) -> list[dict]:
+    async def events(task_id: str | None = None, type: str | None = None, limit: int = 100) -> list[dict]:
         return application.events.history(task_id=task_id, event_type=type, limit=limit)
 
     @api.get("/api/status")
@@ -297,6 +360,8 @@ def create_fastapi_app(application: AetherApp) -> FastAPI:
     @api.post("/api/connect/opencode/select")
     async def opencode_select_models(body: dict[str, Any]) -> dict[str, Any]:
         """Save multi-model Open Code selection into user profile + enable virtual providers."""
+        import yaml
+
         from aether.config.session import (
             UserProfile,
             apply_profile_to_settings_dict,
@@ -306,9 +371,6 @@ def create_fastapi_app(application: AetherApp) -> FastAPI:
             save_profile,
         )
         from aether.config.settings import find_config_path, load_yaml_config, settings_from_dict
-        from aether.app import AetherApp as AppCls
-        import aether.app as app_mod
-        import yaml
 
         models = body.get("models") or []
         if not isinstance(models, list) or not models:
@@ -337,12 +399,14 @@ def create_fastapi_app(application: AetherApp) -> FastAPI:
         merged = apply_profile_to_settings_dict(base, profile)
         merged["data_dir"] = str(data_dir)
         settings = settings_from_dict(merged)
-        new_app = AppCls(settings)
-        await new_app.start()
-        app_mod._app = new_app
+        await application.registry.reconfigure_providers(settings.providers)
 
         # persist user yaml
-        user_cfg = Path.cwd() / "config" / "aether.yaml"
+        discovered = find_config_path()
+        if discovered is not None and discovered.name == "aether.yaml":
+            user_cfg = discovered
+        else:
+            user_cfg = Path.home() / ".aether" / "config.yaml"
         user_cfg.parent.mkdir(parents=True, exist_ok=True)
         safe = apply_profile_to_settings_dict(base, profile)
         safe["data_dir"] = "./data"
@@ -360,7 +424,7 @@ def create_fastapi_app(application: AetherApp) -> FastAPI:
     @api.get("/api/connect/{provider_id}")
     async def connect_status(provider_id: str) -> dict[str, Any]:
         from aether.cli.connect import provider_connect_info
-        from aether.config.session import load_dotenv_file, env_path
+        from aether.config.session import env_path, load_dotenv_file
 
         load_dotenv_file(env_path(Path(application.settings.data_dir)))
         if provider_id in ("claude", "anthropic"):
@@ -368,15 +432,18 @@ def create_fastapi_app(application: AetherApp) -> FastAPI:
         return provider_connect_info(provider_id)
 
     @api.post("/api/connect/{provider_id}")
-    async def connect_provider(provider_id: str, body: ConnectBody = ConnectBody()) -> dict[str, Any]:
+    async def connect_provider(
+        provider_id: str, body: ConnectBody | None = None
+    ) -> dict[str, Any]:
         """
         Connect a provider:
         - claude_cli: starts official browser OAuth (claude auth login)
         - openai/grok/gemini: opens key page; optional api_key in body
         """
         from aether.cli.connect import connect_provider_api
-        from aether.config.session import load_dotenv_file, env_path
+        from aether.config.session import env_path, load_dotenv_file
 
+        body = body or ConnectBody()
         data_dir = Path(application.settings.data_dir)
         load_dotenv_file(env_path(data_dir))
         if provider_id in ("claude", "anthropic"):
@@ -432,9 +499,9 @@ def create_fastapi_app(application: AetherApp) -> FastAPI:
     @api.post("/api/connect/{provider_id}/key")
     async def connect_save_key(provider_id: str, body: ApiKeyBody) -> dict[str, Any]:
         """Save API key for OpenAI/Grok/Gemini-style providers."""
-        from aether.cli.connect import save_api_key
-        from aether.config.session import load_dotenv_file, env_path
         from aether.adapters.api_adapter import ApiAgentAdapter
+        from aether.cli.connect import save_api_key
+        from aether.config.session import env_path, load_dotenv_file
 
         data_dir = Path(application.settings.data_dir)
         load_dotenv_file(env_path(data_dir))
@@ -647,8 +714,9 @@ def create_fastapi_app(application: AetherApp) -> FastAPI:
     @api.post("/api/chat/sessions/{session_id}/stream")
     async def chat_stream(session_id: str, body: ChatMessageBody):
         """SSE stream of tokens for live chat."""
-        from fastapi.responses import StreamingResponse
         import json as _json
+
+        from fastapi.responses import StreamingResponse
 
         session = application.chat_store.load(session_id)
         if not session:
@@ -716,7 +784,7 @@ def create_fastapi_app(application: AetherApp) -> FastAPI:
         return task.model_dump(mode="json")
 
     @api.get("/api/tasks")
-    async def list_tasks(status: Optional[str] = None, limit: int = 50) -> list[dict[str, Any]]:
+    async def list_tasks(status: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
         st = TaskStatus(status) if status else None
         tasks = await application.tasks.list(status=st, limit=limit)
         return [t.model_dump(mode="json") for t in tasks]
@@ -741,7 +809,7 @@ def create_fastapi_app(application: AetherApp) -> FastAPI:
         try:
             t = await application.orchestrator.resume_task(task_id)
             return t.model_dump(mode="json")
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             raise HTTPException(400, str(exc)) from exc
 
     @api.post("/api/tasks/{task_id}/cancel")
@@ -764,11 +832,11 @@ def create_fastapi_app(application: AetherApp) -> FastAPI:
         try:
             task = await application.exporter.import_dict(body, as_paused=True)
             return task.model_dump(mode="json")
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             raise HTTPException(400, str(exc)) from exc
 
     @api.get("/api/approvals")
-    async def list_approvals(task_id: Optional[str] = None, pending: bool = True) -> list[dict]:
+    async def list_approvals(task_id: str | None = None, pending: bool = True) -> list[dict]:
         if pending:
             return [a.model_dump() for a in application.approvals.list_pending(task_id=task_id)]
         return [a.model_dump() for a in application.approvals.list_all()]
@@ -836,12 +904,16 @@ def create_fastapi_app(application: AetherApp) -> FastAPI:
     return api
 
 
-def dashboard_dir(settings: Any) -> Optional[Path]:
+def dashboard_dir(settings: Any) -> Path | None:
     """Location of the built dashboard, if it has been built."""
     configured = getattr(settings.server, "static_dir", "") or ""
     if configured:
         path = Path(configured).expanduser()
         return path if (path / "index.html").exists() else None
-    # repo layout: src/aether/api/server.py -> <repo>/web/dist
-    default = Path(__file__).resolve().parents[3] / "web" / "dist"
-    return default if (default / "index.html").exists() else None
+    # Installed wheel: assets live inside the package.
+    packaged = Path(__file__).resolve().parents[1] / "resources" / "dashboard"
+    if (packaged / "index.html").exists():
+        return packaged
+    # Source checkout: src/aether/api/server.py -> <repo>/web/dist
+    source = Path(__file__).resolve().parents[3] / "web" / "dist"
+    return source if (source / "index.html").exists() else None

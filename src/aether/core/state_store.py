@@ -17,12 +17,25 @@ import json
 import os
 import tempfile
 import time
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Callable, Iterator, Optional
+from typing import Any
 
 LOCK_TIMEOUT_SECONDS = 10.0
 _LOCK_POLL_SECONDS = 0.01
+
+
+class StateStoreError(RuntimeError):
+    """Control-plane state could not be read or committed safely."""
+
+
+class StateLockTimeout(StateStoreError):
+    """Another process held the state lock past the configured deadline."""
+
+
+class StateCorruptionError(StateStoreError):
+    """Persisted state is malformed and must not be treated as empty state."""
 
 
 def _acquire(handle: Any) -> bool:
@@ -64,17 +77,19 @@ class JsonStateStore:
         self._depth = 0
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
-        except OSError:
-            pass
+        except OSError as exc:
+            raise StateStoreError(
+                f"Cannot create state directory {self.path.parent}: {exc}"
+            ) from exc
 
     @contextmanager
     def transaction(self, timeout: float = LOCK_TIMEOUT_SECONDS) -> Iterator[None]:
         """Hold an exclusive cross-process lock across a load/modify/save cycle.
 
         Re-entrant within one instance, so a manager whose write path calls
-        another locked helper does not deadlock against itself. Degrades to a
-        no-op if the lock file cannot be created — losing an update is better
-        than refusing to run.
+        another locked helper does not deadlock against itself. Lock creation
+        and timeout failures are fatal: continuing unlocked can lose approvals,
+        budget increments, or quota usage while reporting success.
         """
         if self._depth > 0:
             self._depth += 1
@@ -87,11 +102,15 @@ class JsonStateStore:
         handle = None
         try:
             handle = self.lock_path.open("a+b")
-        except OSError:
-            yield
-            return
+            # Windows byte-range locking is most portable when the range exists.
+            if handle.seek(0, os.SEEK_END) == 0:
+                handle.write(b"\0")
+                handle.flush()
+        except OSError as exc:
+            raise StateStoreError(f"Cannot open state lock {self.lock_path}: {exc}") from exc
 
         acquired = False
+        entered = False
         deadline = time.monotonic() + timeout
         try:
             while True:
@@ -99,19 +118,21 @@ class JsonStateStore:
                     acquired = True
                     break
                 if time.monotonic() >= deadline:
-                    # contended past the timeout: proceed unlocked rather than
-                    # hang the caller, matching the best-effort contract above
-                    break
+                    raise StateLockTimeout(
+                        f"Timed out after {timeout:.2f}s waiting for {self.lock_path}"
+                    )
                 time.sleep(_LOCK_POLL_SECONDS)
             self._depth += 1
+            entered = True
             yield
         finally:
-            self._depth -= 1
+            if entered:
+                self._depth -= 1
             if acquired:
                 _release(handle)
             handle.close()
 
-    def update(self, mutate: Callable[[dict[str, Any]], Optional[dict[str, Any]]]) -> dict[str, Any]:
+    def update(self, mutate: Callable[[dict[str, Any]], dict[str, Any] | None]) -> dict[str, Any]:
         """Atomic read-modify-write. `mutate` edits in place or returns a new dict."""
         with self.transaction():
             data = self.load()
@@ -125,24 +146,28 @@ class JsonStateStore:
             return {}
         try:
             data = json.loads(self.path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return {}
-        return data if isinstance(data, dict) else {}
+        except OSError as exc:
+            raise StateStoreError(f"Cannot read state file {self.path}: {exc}") from exc
+        except ValueError as exc:
+            raise StateCorruptionError(f"Invalid JSON in state file {self.path}: {exc}") from exc
+        if not isinstance(data, dict):
+            raise StateCorruptionError(f"State file root must be an object: {self.path}")
+        return data
 
     def save(self, data: dict[str, Any]) -> None:
         """Write via a temp file + rename so a reader never sees a partial file."""
+        tmp_name: str | None = None
         try:
             fd, tmp_name = tempfile.mkstemp(dir=str(self.path.parent), suffix=".tmp")
-            try:
-                with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                    json.dump(data, handle, default=str)
-                os.replace(tmp_name, self.path)
-            except BaseException:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                json.dump(data, handle, default=str)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(tmp_name, self.path)
+        except OSError as exc:
+            if tmp_name is not None:
                 try:
                     os.unlink(tmp_name)
                 except OSError:
                     pass
-                raise
-        except OSError:
-            # state persistence is best-effort; never break the run over it
-            pass
+            raise StateStoreError(f"Cannot commit state file {self.path}: {exc}") from exc

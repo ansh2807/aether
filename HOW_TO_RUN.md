@@ -42,7 +42,8 @@ AETHER will ask you, in order:
 | `/setup` | connect real models (see below) |
 | `/quit` | save and exit |
 
-`(mock)` in the prompt is the **active model**. The mock agent is a built-in
+`(mock)` in the prompt is the **active model** when you explicitly use `--demo`.
+The mock agent is a built-in
 stand-in that invents plausible answers so you can try AETHER without any
 accounts — its replies are not from a real model. Run `/setup` or
 `/connect claude_cli` to use a real one.
@@ -95,7 +96,7 @@ Open a terminal **in the project folder**, or double-click:
 cd %USERPROFILE%\Desktop\aether
 
 .\run.bat doctor
-.\run.bat run "Build a small Python hello module"
+.\run.bat run --demo "Build a small Python hello module"
 .\run.bat status
 .\run.bat task list
 .\run.bat serve
@@ -109,7 +110,7 @@ cd %USERPROFILE%\Desktop\aether
 cd %USERPROFILE%\Desktop\aether
 .\.venv\Scripts\Activate.ps1
 aether doctor
-aether run "Build a small Python hello module"
+aether run --demo "Build a small Python hello module"
 ```
 
 If activation is blocked by execution policy:
@@ -152,8 +153,8 @@ npm run build
 Then open the dashboard link printed by `aether serve` (it carries the token).
 No second terminal, no dev server, no proxy.
 
-`npm run dev` is only for live-editing the UI. Every open npm advisory in the
-front-end tree is dev-server-only, so prefer the build above for normal use.
+`npm run dev` is only for live-editing the UI. The development server is extra
+production surface, so prefer the static build above for normal use.
 
 ---
 
@@ -178,9 +179,9 @@ Result: `status=COMPLETED` with files under `workspace\TASK-...`
 | `'run.bat' is not recognized` (in the project folder!) | `NoDefaultCurrentDirectoryInExePath=1` stops the shell searching the current folder | prefix it: `.\run.bat` |
 | `aether` without activate | Command not found | `.\.venv\Scripts\Activate.ps1` first |
 | Dashboard only | No backend | Run `serve.bat` / `aether serve` first |
-| Expecting Claude/GPT without config | Only **mock** is enabled | Enable providers in config + API keys/CLIs |
+| Expecting Claude/GPT without config | No real provider is enabled | Run setup and enable a provider; use `--demo` only for simulation |
 | `UnicodeEncodeError: 'charmap' codec…` | Console is on a legacy code page | Fixed automatically now; the `.bat` files also set `chcp 65001`. If you launch `aether.exe` by hand from an old console, run `chcp 65001` first |
-| Dashboard shows 401 / won't load | API is token-gated | Use the dashboard link printed by `aether serve` (it carries `?token=…`) |
+| Dashboard shows 401 / won't load | API is token-gated | Use the dashboard link printed by `aether serve` (it carries `#token=…`) |
 
 Any command that fails now prints a one-line reason instead of a traceback.
 Set `AETHER_DEBUG=1` to see the full traceback.

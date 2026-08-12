@@ -10,14 +10,14 @@ verification. Models are pluggable adapters — not the thing in charge.
 [![CI](https://github.com/ansh2807/aether/actions/workflows/ci.yml/badge.svg)](https://github.com/ansh2807/aether/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache--2.0-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-346-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-389-brightgreen.svg)](tests/)
 
 </div>
 
 ---
 
-`aether run "Build a small Python hello module"` — real output, default offline
-config (the bundled mock agent, so you can try the whole lifecycle with no keys):
+`aether run --demo "Build a small Python hello module"` — an explicitly
+simulated offline run, so you can try the whole lifecycle with no keys:
 
 ```text
 ┌───────────────────── Task started ──────────────────────┐
@@ -162,8 +162,8 @@ with no orchestrator changes.
 - **The orchestrator is authoritative.** Agents never own global state.
 - **No fake integrations.** A provider without a real adapter reports
   `ADAPTER_REQUIRED` and refuses, rather than pretending. The bundled mock agent
-  is never routable while a real provider is enabled — a fabricated success must
-  never stand in for a real failure.
+  is disabled by default and enabled explicitly by `--demo`; it is never routable
+  as failover for a real provider unless separately opted in.
 - **Verification before trust.** Artifacts are checked; claims are not.
 - **Respect provider auth and terms.** CLI adapters drive already-authenticated
   CLIs via subprocess. Nothing scrapes credentials or converts a subscription
@@ -259,8 +259,8 @@ python -m venv .venv
 
 pip install -e ".[dev]"
 
-# Smoke: mock agent completes a full task lifecycle
-aether task "Build a small Python hello module"
+# Explicit simulation: mock agent completes a lifecycle (not real work)
+aether run --demo "Build a small Python hello module"
 
 # System status / provider health
 aether status
@@ -280,14 +280,16 @@ cd web && npm install && npm run build
 ```
 
 > **The dashboard needs the API token from `aether serve`.**
-> Open the link it prints — `http://127.0.0.1:7420/?token=…` — not a bare
-> `localhost:7420`. The token is stored in `localStorage` on first load, so
-> later visits work without the query string. Without it the page loads but
+> Open the link it prints — `http://127.0.0.1:7420/#token=…` — not a bare
+> `localhost:7420`. The fragment is exchanged for an HttpOnly, SameSite cookie
+> and immediately removed; the bearer token is never stored in `localStorage`.
+> Later visits work until the eight-hour dashboard session expires. Without it the page loads but
 > every panel shows *"API token missing or invalid"*. See
 > [API authentication](#api-authentication).
 
-Default config enables the **mock** adapter for offline development and tests.  
-Real providers are **disabled** until you enable them and supply keys/CLIs.
+Default config keeps the **mock** adapter disabled. Real providers are also
+disabled until you enable them and supply keys/CLIs. Use `--demo` when you
+explicitly want simulated output.
 
 > The mock agent fabricates plausible output and always reports success. It is
 > routable **only while no real provider is enabled** — it will never quietly
@@ -417,9 +419,13 @@ visible rather than hidden; `X-Aether-Failovers` counts them.
 ## Run it in Docker
 
 ```bash
-docker build -t aether .
-docker run -p 7420:7420 -v aether-data:/data -v aether-ws:/workspace aether
+docker compose up --build
 ```
+
+The bundled Compose profile binds only to `127.0.0.1`, persists `/data` and
+`/workspace`, runs with a read-only root filesystem, drops every Linux
+capability, enables no-new-privileges, and caps memory, CPU and processes. See
+[`docs/DEPLOY.md`](docs/DEPLOY.md) before putting a reverse proxy in front of it.
 
 Agent-CLI providers need binaries authenticated on a real machine, so a
 container is an API-provider deployment — `aether models` will show every CLI
@@ -638,15 +644,17 @@ but not other local processes or a web page in your browser, so the API is
 **token-gated by default**.
 
 The token is generated on first run into `data/api_token` (or set
-`AETHER_API_TOKEN`). `aether serve` prints it along with a dashboard link that
-carries it; the dashboard stores it in `localStorage` for later reloads.
+`AETHER_API_TOKEN`). `aether serve` prints it along with a dashboard link whose
+URL fragment is exchanged for an eight-hour HttpOnly, SameSite cookie. The
+bearer token is never placed in browser storage or an HTTP query string.
 
 ```bash
 curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:7420/api/status
 ```
 
-`X-Aether-Token` and `?token=` are also accepted — the latter for WebSocket and
-EventSource, which cannot set headers. Only `/api/health` is public. Disable with
+`X-Aether-Token` is also accepted. `?token=` is restricted to WebSocket clients,
+whose browser API cannot set headers; ordinary HTTP query-token authentication
+is rejected. Only `/api/health` is public. Disable with
 `server.require_auth: false` if you have another control in front of it.
 
 CORS lists only `server.cors_origins`; there is deliberately no wildcard origin,
@@ -659,21 +667,22 @@ workflow needs no Vite dev server:
 
 ```bash
 cd web && npm install && npm run build   # once, and after UI changes
-aether serve                             # prints http://127.0.0.1:7420/?token=...
+aether serve                             # prints http://127.0.0.1:7420/#token=...
 ```
 
-This matters for more than convenience. Every current npm advisory in this
-project's front-end tree is **dev-server only** (path traversal in Vite's
-optimized-deps handling, a `server.fs.deny` bypass on Windows, an NTLM hash
-disclosure via `launch-editor` on Windows). None of them are reachable if you
-never run `npm run dev`. Building and serving statically removes that surface
-instead of chasing versions.
+This matters for more than convenience: the development server is unnecessary
+production surface. The dashboard toolchain is kept audit-clean, but normal
+deployments still build once and serve only static assets from the authenticated
+API process.
 
 Static files are public; every byte of *data* still requires the token. Point
 `server.static_dir` elsewhere to serve a dashboard built somewhere else.
 
 Use `npm run dev` only when actively editing the UI and you want HMR — and
 close it when you're done.
+
+For reverse-proxy TLS, container persistence, backup, secret handling and
+production verification settings, see [`docs/DEPLOY.md`](docs/DEPLOY.md).
 
 ### Execution policy (`ExecutionSandbox`)
 

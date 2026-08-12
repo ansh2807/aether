@@ -44,7 +44,7 @@ def settings(tmp_aether_dir: Path) -> AetherSettings:
         ),
         circuit_breaker=CircuitBreakerSettings(failure_threshold=3, recovery_timeout_seconds=1),
         quota=QuotaSettings(default_requests_per_minute=1000, default_daily_requests=10000),
-        security=SecuritySettings(approval_level="safe"),
+        security=SecuritySettings(approval_level="safe", verification_sandbox="subprocess"),
     )
     s.providers = {
         "mock": ProviderConfig(

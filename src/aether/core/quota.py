@@ -51,17 +51,14 @@ class QuotaManager:
         if self.store is None:
             return
         data = self.store.load()
-        try:
-            self._usage = {
-                pid: UsageSnapshot.model_validate(item)
-                for pid, item in (data.get("usage") or {}).items()
-            }
-            self._cooldowns = {
-                pid: datetime.fromisoformat(value)
-                for pid, value in (data.get("cooldowns") or {}).items()
-            }
-        except Exception:  # noqa: BLE001 - corrupt state must not break the run
-            pass
+        self._usage = {
+            pid: UsageSnapshot.model_validate(item)
+            for pid, item in (data.get("usage") or {}).items()
+        }
+        self._cooldowns = {
+            pid: datetime.fromisoformat(value)
+            for pid, value in (data.get("cooldowns") or {}).items()
+        }
 
     def _flush(self) -> None:
         if self.store is None:

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from aether.adapters.api_adapter import ApiAgentAdapter
 from aether.adapters.cli_adapter import CliAgentAdapter
@@ -24,7 +24,7 @@ class AgentRegistry:
     def __init__(
         self,
         settings: AetherSettings,
-        sandbox: Optional[ExecutionSandbox] = None,
+        sandbox: ExecutionSandbox | None = None,
         include_test_adapters: bool = True,
     ) -> None:
         self.settings = settings
@@ -34,7 +34,7 @@ class AgentRegistry:
         self._configs: dict[str, ProviderConfig] = dict(settings.providers)
         self._entry_points: dict[str, Any] = {}
 
-    def register(self, adapter: AgentAdapter, config: Optional[ProviderConfig] = None) -> None:
+    def register(self, adapter: AgentAdapter, config: ProviderConfig | None = None) -> None:
         self._adapters[adapter.provider_id] = adapter
         if config:
             self._configs[adapter.provider_id] = config
@@ -49,7 +49,7 @@ class AgentRegistry:
             if adapter is not None:
                 self._adapters[pid] = adapter
 
-    def _create_adapter(self, cfg: ProviderConfig) -> Optional[AgentAdapter]:
+    def _create_adapter(self, cfg: ProviderConfig) -> AgentAdapter | None:
         # Explicit plugin class path wins
         plugin = create_plugin_adapter(cfg, sandbox=self.sandbox)
         if plugin is not None:
@@ -108,16 +108,59 @@ class AgentRegistry:
         for adapter in self._adapters.values():
             try:
                 await adapter.shutdown()
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as exc:  # noqa: BLE001
+                log.warning(
+                    "provider_shutdown_failed", provider=adapter.provider_id, error=str(exc)
+                )
 
-    def get(self, provider_id: str) -> Optional[AgentAdapter]:
+    async def reconfigure_providers(self, providers: dict[str, ProviderConfig]) -> None:
+        """Atomically replace the live provider set without replacing the app.
+
+        FastAPI route closures, task managers, and the lifespan all reference
+        the existing ``AetherApp``. Constructing a second app during a request
+        leaks its database/HTTP resources and leaves those closures pointing at
+        stale providers. Rebuilding this registry in place keeps one owner.
+        """
+        old_adapters = self._adapters
+        old_configs = self._configs
+        self._adapters = {}
+        self._configs = dict(providers)
+        self.settings.providers = dict(providers)
+        try:
+            self.build_from_config()
+            for adapter in self._adapters.values():
+                await adapter.initialize()
+        except Exception:
+            for adapter in self._adapters.values():
+                try:
+                    await adapter.shutdown()
+                except Exception as exc:  # noqa: BLE001
+                    log.warning(
+                        "new_provider_cleanup_failed",
+                        provider=adapter.provider_id,
+                        error=str(exc),
+                    )
+            self._adapters = old_adapters
+            self._configs = old_configs
+            self.settings.providers = dict(old_configs)
+            raise
+        for adapter in old_adapters.values():
+            try:
+                await adapter.shutdown()
+            except Exception as exc:  # noqa: BLE001
+                log.warning(
+                    "provider_shutdown_failed_during_reconfigure",
+                    provider=adapter.provider_id,
+                    error=str(exc),
+                )
+
+    def get(self, provider_id: str) -> AgentAdapter | None:
         return self._adapters.get(provider_id)
 
     def list_ids(self) -> list[str]:
         return sorted(self._adapters.keys())
 
-    def get_config(self, provider_id: str) -> Optional[ProviderConfig]:
+    def get_config(self, provider_id: str) -> ProviderConfig | None:
         return self._configs.get(provider_id)
 
     def list_configs(self) -> list[ProviderConfig]:
@@ -127,7 +170,7 @@ class AgentRegistry:
         results: list[HealthStatus] = []
         for pid, adapter in self._adapters.items():
             cfg = self._configs.get(pid)
-            if cfg and not cfg.enabled and cfg.adapter != AdapterType.MOCK:
+            if cfg and not cfg.enabled:
                 results.append(
                     HealthStatus(
                         provider_id=pid,
@@ -161,6 +204,6 @@ class AgentRegistry:
         for pid, cfg in self._configs.items():
             if pid not in self._adapters:
                 continue
-            if cfg.enabled or cfg.adapter == AdapterType.MOCK:
+            if cfg.enabled:
                 out.append(pid)
         return out

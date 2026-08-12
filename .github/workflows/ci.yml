@@ -111,15 +111,22 @@ jobs:
           context: .
           push: false
           load: true
-          tags: aether:ci
+          tags: aether:local
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Verifier has offline pytest tooling
+        run: |
+          docker run --rm --network none --read-only \
+            --cap-drop ALL --security-opt no-new-privileges=true \
+            aether:local pytest --version
 
       # Building proves it compiles; this proves it runs. An image that starts
       # and then 500s on the first request is not a passing build.
       - name: Boot it and hit the API
         run: |
-          docker run -d --name aether-ci -p 7420:7420 aether:ci
+          docker compose config --quiet
+          docker compose up -d --no-build
           for i in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:7420/api/health; then echo; break; fi
             sleep 2
@@ -138,4 +145,48 @@ jobs:
 
       - name: Logs on failure
         if: failure()
-        run: docker logs aether-ci || true
+        run: docker compose logs || true
+
+      - name: Clean up
+        if: always()
+        run: docker compose down --volumes --remove-orphans
+
+  package:
+    name: wheel smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Build packaged dashboard
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+      - name: Build wheel
+        run: |
+          python -m pip install build
+          python -m build --wheel
+      - name: Install into a clean environment
+        run: |
+          python -m venv wheel-smoke
+          wheel-smoke/bin/pip install dist/*.whl
+          cd "$(mktemp -d)"
+          "$GITHUB_WORKSPACE/wheel-smoke/bin/aether" --version
+          "$GITHUB_WORKSPACE/wheel-smoke/bin/python" - <<'PY'
+          from aether.api.server import dashboard_dir
+          from aether.config.settings import find_config_path, load_settings
+          config = find_config_path()
+          assert config and config.name == "aether.default.yaml", config
+          settings = load_settings()
+          dashboard = dashboard_dir(settings)
+          assert dashboard and (dashboard / "index.html").is_file(), dashboard
+          print(f"config={config}")
+          print(f"dashboard={dashboard}")
+          PY

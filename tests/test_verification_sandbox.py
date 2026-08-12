@@ -8,12 +8,16 @@ the machine — undoes the point of the exercise.
 from __future__ import annotations
 
 import shutil
+import subprocess
 import sys
+import json
+import os
 from pathlib import Path
 
 import pytest
 
-from aether.core.verification import VerificationEngine
+from aether.config.settings import SecuritySettings
+from aether.core.verification import CONTAINER_IMAGE, VerificationEngine
 
 SECRET = "sk-durability-canary-do-not-leak"
 PEEK = (
@@ -27,6 +31,40 @@ def _workspace(tmp_path: Path) -> Path:
     ws.mkdir()
     (ws / "peek.py").write_text(PEEK, encoding="utf-8")
     return ws
+
+
+def _linux_container_runtime_available() -> bool:
+    runtime = shutil.which("docker") or shutil.which("podman")
+    if runtime is None:
+        return False
+    template = "{{.OSType}}" if Path(runtime).name.lower().startswith("docker") else "{{.Host.Os}}"
+    try:
+        result = subprocess.run(
+            [runtime, "info", "--format", template],
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return result.returncode == 0 and result.stdout.strip().lower() == "linux"
+
+
+def _container_image_available(image: str) -> bool:
+    runtime = shutil.which("docker") or shutil.which("podman")
+    if runtime is None:
+        return False
+    try:
+        result = subprocess.run(
+            [runtime, "image", "inspect", image],
+            capture_output=True,
+            check=False,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return result.returncode == 0
 
 
 @pytest.mark.asyncio
@@ -78,54 +116,149 @@ async def test_off_mode_is_documented_as_leaky(tmp_path: Path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_container_mode_degrades_loudly_without_a_runtime(tmp_path: Path, monkeypatch):
-    """Silently downgrading someone's isolation is the worst possible outcome."""
+async def test_container_mode_fails_closed_without_a_runtime(tmp_path: Path, monkeypatch):
+    """Requested isolation must never silently execute on the host."""
     monkeypatch.setattr(VerificationEngine, "_container_runtime", lambda self: None)
     ws = _workspace(tmp_path)
 
     engine = VerificationEngine(repo=None, sandbox_mode="container")
     code, out = await engine._run([sys.executable, "peek.py"], cwd=ws, timeout=60)
 
+    assert code != 0
+    assert "verification blocked" in out
+    assert not (ws / "seen.json").exists(), "untrusted code still ran on the host"
+
+
+@pytest.mark.asyncio
+async def test_container_fallback_requires_explicit_opt_in(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(VerificationEngine, "_container_runtime", lambda self: None)
+    ws = _workspace(tmp_path)
+
+    engine = VerificationEngine(
+        repo=None, sandbox_mode="container", allow_container_fallback=True
+    )
+    code, out = await engine._run([sys.executable, "peek.py"], cwd=ws, timeout=60)
+
     assert code == 0
-    assert "container runtime not found" in out, "the downgrade was not reported"
+    assert "explicit fallback enabled" in out
     seen = (ws / "seen.json").read_text(encoding="utf-8")
-    assert "OPENAI_API_KEY" not in seen, "downgrade must still scrub"
+    assert "OPENAI_API_KEY" not in seen
+
+
+def test_container_command_uses_hardening_flags(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(VerificationEngine, "_container_runtime", lambda self: "docker")
+    engine = VerificationEngine(repo=None, container_image="trusted-verifier:test")
+
+    wrapped = engine._containerise(["python", "probe.py"], tmp_path)
+
+    assert wrapped is not None
+    argv, name = wrapped
+    assert name.startswith("aether-verify-")
+    assert ["--cap-drop", "ALL"] == argv[argv.index("--cap-drop") : argv.index("--cap-drop") + 2]
+    assert "no-new-privileges=true" in argv
+    assert "--read-only" in argv
+    assert "--network" in argv and "none" in argv
+    assert "--user" in argv
+    assert "trusted-verifier:test" in argv
+
+
+def test_config_and_engine_use_the_same_pinned_verifier_image():
+    assert SecuritySettings().verification_image == CONTAINER_IMAGE
+    assert CONTAINER_IMAGE == "aether:local"
 
 
 @pytest.mark.skipif(
-    not (shutil.which("docker") or shutil.which("podman")),
-    reason="no container runtime on this machine",
-)
-@pytest.mark.skipif(
-    sys.platform == "win32",
-    reason=(
-        "the sandbox image is Linux; Windows runners have docker on PATH but "
-        "default to Windows containers, so the runtime exists and still cannot "
-        "run it — presence of the binary is not usability"
-    ),
+    not _linux_container_runtime_available(),
+    reason="no running Linux container engine on this machine",
 )
 @pytest.mark.asyncio
-async def test_container_mode_has_no_network(tmp_path: Path):
+async def test_container_mode_is_hardened(tmp_path: Path):
     ws = tmp_path / "ws"
     ws.mkdir()
-    (ws / "net.py").write_text(
-        "import socket, pathlib\n"
+    (ws / "probe.py").write_text(
+        "import json, os, socket, pathlib\n"
+        "network = 'reachable'\n"
         "try:\n"
         "    socket.create_connection(('1.1.1.1', 53), timeout=3)\n"
-        "    pathlib.Path('net.txt').write_text('reachable')\n"
         "except OSError:\n"
-        "    pathlib.Path('net.txt').write_text('blocked')\n",
+        "    network = 'blocked'\n"
+        "status = pathlib.Path('/proc/self/status').read_text()\n"
+        "fields = dict(line.split(':', 1) for line in status.splitlines() if ':' in line)\n"
+        "pathlib.Path('sandbox.json').write_text(json.dumps({\n"
+        "    'network': network,\n"
+        "    'uid': os.getuid(),\n"
+        "    'verification': os.environ.get('AETHER_VERIFICATION'),\n"
+        "    'cap_eff': fields['CapEff'].strip(),\n"
+        "    'no_new_privs': fields['NoNewPrivs'].strip(),\n"
+        "}))\n",
         encoding="utf-8",
     )
     engine = VerificationEngine(repo=None, sandbox_mode="container")
-    code, out = await engine._run(["python", "net.py"], cwd=ws, timeout=180)
+    code, out = await engine._run(["python", "probe.py"], cwd=ws, timeout=180)
 
-    # Distinguish "the sandbox let the network through" from "the container
-    # never ran". Asserting on the artefact alone reports the second as the
-    # first, which is the worst way for a security test to fail.
-    if not (ws / "net.txt").exists():
+    if not (ws / "sandbox.json").exists():
         pytest.skip(f"container did not run (exit {code}): {out[:200]}")
-    assert (ws / "net.txt").read_text(encoding="utf-8") == "blocked"
+    assert code == 0, out
+    result = json.loads((ws / "sandbox.json").read_text(encoding="utf-8"))
+    assert result == {
+        "network": "blocked",
+        "uid": 65534 if sys.platform == "win32" or os.getuid() == 0 else os.getuid(),
+        "verification": "1",
+        "cap_eff": "0000000000000000",
+        "no_new_privs": "1",
+    }
+
+
+@pytest.mark.skipif(
+    not _linux_container_runtime_available(),
+    reason="no running Linux container engine on this machine",
+)
+@pytest.mark.asyncio
+async def test_container_timeout_removes_the_container(tmp_path: Path):
+    runtime = shutil.which("docker") or shutil.which("podman")
+    assert runtime is not None
+
+    def running_verifiers() -> set[str]:
+        result = subprocess.run(
+            [runtime, "ps", "--filter", "name=aether-verify-", "--format", "{{.Names}}"],
+            capture_output=True,
+            check=True,
+            text=True,
+            timeout=10,
+        )
+        return {line for line in result.stdout.splitlines() if line}
+
+    before = running_verifiers()
+    engine = VerificationEngine(repo=None, sandbox_mode="container")
+    code, out = await engine._run(
+        ["python", "-c", "import time; time.sleep(30)"],
+        cwd=tmp_path,
+        timeout=1,
+    )
+
+    assert code == 1
+    assert "timed out" in out
+    assert running_verifiers() == before
+
+
+@pytest.mark.skipif(
+    not (_linux_container_runtime_available() and _container_image_available(CONTAINER_IMAGE)),
+    reason=f"the supported verifier image {CONTAINER_IMAGE!r} is not built",
+)
+@pytest.mark.asyncio
+async def test_default_verifier_image_runs_pytest_without_network(tmp_path: Path):
+    (tmp_path / "test_probe.py").write_text(
+        "import os\n"
+        "def test_verification_environment():\n"
+        "    assert os.environ['AETHER_VERIFICATION'] == '1'\n",
+        encoding="utf-8",
+    )
+    engine = VerificationEngine(repo=None, sandbox_mode="container")
+
+    code, out = await engine._run(["pytest", "-q", "--tb=no"], cwd=tmp_path, timeout=180)
+
+    assert code == 0, out
+    assert "1 passed" in out
 
 
 # --- WO-12: verification that fits the task ------------------------------

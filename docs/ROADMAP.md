@@ -439,8 +439,6 @@ Real demand should pull these, not enthusiasm:
 - **MCP tool support**, so agents call tools through AETHER
 - **Provider capability auto-probing** instead of hand-tuned scores
 - **Scheduled / recurring tasks**
-- **Vite 5 → 6 upgrade** — dev-server-only advisories, and the dashboard is now
-  built and served by the API, so the dev server is out of the normal path
 
 ## 8. Not doing
 

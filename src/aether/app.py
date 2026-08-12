@@ -82,6 +82,8 @@ class AetherApp:
             self.repo,
             sandbox=self.sandbox,
             sandbox_mode=settings.security.verification_sandbox,
+            allow_container_fallback=settings.security.verification_allow_fallback,
+            container_image=settings.security.verification_image,
         )
         self.workflow = WorkflowEngine()
         self.chat_store = ChatSessionStore(settings.data_dir / "chat_sessions")

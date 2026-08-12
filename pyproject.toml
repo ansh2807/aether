@@ -69,11 +69,15 @@ aether = "aether.cli.main:app"
 [tool.hatch.build.targets.wheel]
 packages = ["src/aether"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"config/aether.default.yaml" = "aether/resources/aether.default.yaml"
+"web/dist" = "aether/resources/dashboard"
+
 [tool.hatch.build]
 dev-mode-dirs = ["src"]
 
 [tool.hatch.build.targets.sdist]
-include = ["src/aether", "config", "docs", "README.md"]
+include = ["src/aether", "config", "docs", "web/dist", "README.md", "LICENSE"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

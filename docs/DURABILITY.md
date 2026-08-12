@@ -32,7 +32,7 @@ pytest tests/test_durability.py tests/test_retry.py tests/test_export_resume.py 
 | Two agents writing the task at once | ✅ | locked read-modify-write on the task document; measured 10/10 concurrent completions preserved, versus 1/10 before | `test_concurrent_updates_do_not_lose_sibling_writes` |
 | Cancelling mid-execution | ✅ | in-flight subprocesses are killed for every participating agent, not just the active one | `test_18_cancel_mid_flight`, `test_cancel_all_kills_every_in_flight_execution` |
 | Two agents editing the same file | ✅ | the merge is a real merge; conflicts surface as a resolver subtask instead of one agent silently overwriting the other | `test_merge_detects_conflict_between_parallel_agents`, `test_merge_preserves_existing_main_commits` |
-| Verified code tries to read your API keys | ✅ | the verification subprocess gets an allowlist environment, not yours | `test_secrets_are_not_visible_to_verified_code`, `test_container_mode_degrades_loudly_without_a_runtime` |
+| Verified code tries to read your API keys | ✅ | container verification is the default; the explicit subprocess mode gets an allowlist environment, not yours | `test_secrets_are_not_visible_to_verified_code`, `test_container_mode_fails_closed_without_a_runtime` |
 | Unsourced research claims "done" | ✅ | research output must cite sources and address the question, or verification fails | `test_unsourced_research_fails_verification`, `test_research_that_ignores_the_question_is_flagged` |
 | A provider fails and the mock is available | ✅ | the mock is **not** routable while a real provider is enabled, so a fabricated success can never stand in for a real failure | `test_mock_not_routable_when_real_provider_configured` |
 | Corrupt state file on disk | ✅ | treated as empty and rewritten rather than crashing the run | `test_store_survives_corrupt_file` |
@@ -98,24 +98,31 @@ gate is persisted and re-resolvable, but the coroutine waiting on it is not.
 very large description — realistically, accumulated verification-failure detail —
 can still push a request over the window. Known, unfixed.
 
-### Verification isolation is partial
+### Verification isolation is bounded
 
 The verification gate runs agent-written code, so `security.verification_sandbox`
 controls how:
 
 | Mode | What it gives you |
 |---|---|
-| `subprocess` *(default)* | an allowlist environment — the code cannot read your provider keys |
-| `container` | plus no network, read-only root, memory and pid caps (needs docker/podman) |
+| `container` *(default)* | no network, non-root UID, no capabilities, no-new-privileges, read-only root, and CPU/memory/pid/file caps (needs docker/podman) |
+| `subprocess` | an allowlist environment — the code cannot read your provider keys, but it is not host isolation |
 | `off` | inherits everything; only for a workspace you already trust |
 
-The default stops secret theft, which was the live hole: before this, an
+The default provides host isolation and stops secret theft: before this, an
 agent-written test could read every provider key on the machine
-(`test_secrets_are_not_visible_to_verified_code`). It does **not** stop the code
-from using the network, spawning processes, or writing outside the workspace —
-only `container` does that, and only where a runtime is installed. If a runtime
-is missing, the run degrades to `subprocess` and says so rather than silently
-pretending to be isolated (`test_container_mode_degrades_loudly_without_a_runtime`).
+(`test_secrets_are_not_visible_to_verified_code`). If a container runtime is
+missing, verification fails closed without executing the code. Trusted local
+installations can explicitly set `security.verification_allow_fallback: true`
+to permit the weaker scrubbed subprocess mode.
+
+The default verifier is the locally built `aether:local` image. Its upstream
+base images and pytest artifacts are digest/hash pinned, and the production scan
+must pass before release. If a project's tests need third-party dependencies,
+prebuild a trusted verifier image containing only those dependencies and set
+`security.verification_image` (or `AETHER_SECURITY__VERIFICATION_IMAGE`) to its
+immutable digest. A missing dependency fails the check; verification never
+enables network access to install packages while agent-written code is mounted.
 
 ---
 

@@ -41,7 +41,9 @@ from aether.domain.models import (
 async def test_verification_run_kills_process_on_timeout(tmp_path: Path, monkeypatch):
     import asyncio
 
-    engine = VerificationEngine(repo=None)  # repo is unused by _run
+    # This test exercises host-process timeout cleanup specifically; production
+    # verification defaults to the fail-closed container mode.
+    engine = VerificationEngine(repo=None, sandbox_mode="subprocess")  # repo unused by _run
     captured: dict[str, "asyncio.subprocess.Process"] = {}
     orig_create = asyncio.create_subprocess_exec
 

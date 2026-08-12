@@ -34,6 +34,8 @@ def test_unauthenticated_requests_are_rejected(client: TestClient):
     # the endpoints that matter most: key storage and sandbox grants
     assert client.post("/api/connect/openai/key", json={"api_key": "sk-x"}).status_code == 401
     assert client.post("/api/sandbox/grant", json={"operation": "install"}).status_code == 401
+    assert client.get("/docs").status_code == 401
+    assert client.get("/openapi.json").status_code == 401
 
 
 def test_bearer_token_is_accepted(client: TestClient, app: AetherApp):
@@ -46,9 +48,54 @@ def test_header_token_is_accepted(client: TestClient, app: AetherApp):
     assert res.status_code == 200
 
 
-def test_query_token_is_accepted_for_header_less_clients(client: TestClient, app: AetherApp):
+def test_query_token_is_rejected_for_http_requests(client: TestClient, app: AetherApp):
     res = client.get(f"/api/tasks?token={_token(app)}")
-    assert res.status_code == 200
+    assert res.status_code == 401
+
+
+def test_dashboard_exchanges_fragment_token_for_httponly_cookie(
+    client: TestClient, app: AetherApp
+):
+    res = client.post(
+        "/api/auth/session", headers={"Authorization": f"Bearer {_token(app)}"}
+    )
+    assert res.status_code == 204
+    cookie = res.headers["set-cookie"].lower()
+    assert "httponly" in cookie
+    assert "samesite=strict" in cookie
+    assert client.get("/api/tasks").status_code == 200
+
+
+def test_cookie_authenticated_mutation_rejects_untrusted_origin(
+    client: TestClient, app: AetherApp
+):
+    client.post("/api/auth/session", headers={"Authorization": f"Bearer {_token(app)}"})
+    res = client.post(
+        "/api/tasks",
+        headers={"Origin": "https://attacker.invalid"},
+        json={"prompt": "do a thing"},
+    )
+    assert res.status_code == 403
+
+    # Merely adding an invalid Authorization header must not bypass the cookie
+    # origin check; only a valid bearer client is exempt from CSRF controls.
+    res = client.post(
+        "/api/tasks",
+        headers={
+            "Origin": "https://attacker.invalid",
+            "Authorization": "Bearer invalid",
+        },
+        json={"prompt": "do a thing"},
+    )
+    assert res.status_code == 403
+
+
+def test_security_headers_are_present(client: TestClient):
+    res = client.get("/api/health")
+    assert res.headers["x-content-type-options"] == "nosniff"
+    assert res.headers["x-frame-options"] == "DENY"
+    assert res.headers["referrer-policy"] == "no-referrer"
+    assert "frame-ancestors 'none'" in res.headers["content-security-policy"]
 
 
 def test_wrong_token_is_rejected(client: TestClient):
@@ -63,6 +110,10 @@ def test_websocket_requires_token(client: TestClient, app: AetherApp):
         ws.receive_json()
 
     with client.websocket_connect(f"/ws?token={_token(app)}") as ws:
+        assert ws.receive_json()["type"] == "connected"
+
+    client.post("/api/auth/session", headers={"Authorization": f"Bearer {_token(app)}"})
+    with client.websocket_connect("/ws") as ws:
         assert ws.receive_json()["type"] == "connected"
 
 
@@ -81,6 +132,12 @@ def test_token_is_persisted_and_reused(app: AetherApp):
     first = load_or_create_token(data_dir)
     assert token_path(data_dir).exists()
     assert load_or_create_token(data_dir) == first
+
+
+def test_short_environment_token_is_rejected(app: AetherApp, monkeypatch):
+    monkeypatch.setenv("AETHER_API_TOKEN", "short")
+    with pytest.raises(ValueError, match="at least 32"):
+        load_or_create_token(Path(app.settings.data_dir))
 
 
 def test_auth_can_be_disabled_deliberately(app: AetherApp):

@@ -17,8 +17,8 @@ pytest -q                       # should be all green, no keys needed
 ruff check --select F,E9 src tests
 ```
 
-No API keys are required to develop or to run the test suite. The default
-config enables the bundled mock adapter, which is enough to exercise the whole
+No API keys are required to develop or to run the test suite. The default test
+fixtures enable the bundled mock adapter, which is enough to exercise the whole
 task lifecycle offline.
 
 If you want to work against a real provider, `aether models` lists everything

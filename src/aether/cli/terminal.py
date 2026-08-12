@@ -113,7 +113,7 @@ def render_getting_started(active: str, has_real_provider: bool) -> Panel:
 def _enabled_line(app: AetherApp, profile: UserProfile) -> str:
     parts: list[str] = []
     for cfg in app.registry.list_configs():
-        if not (cfg.enabled or (cfg.for_testing and cfg.provider_id == "mock")):
+        if not cfg.enabled:
             continue
         model = cfg.model or profile.models.get(cfg.provider_id) or "-"
         short = cfg.provider_id.replace("_cli", "")
@@ -364,7 +364,7 @@ async def run_terminal(
             table.add_column("Model")
             table.add_column("On")
             for cfg in app.registry.list_configs():
-                if cfg.enabled or cfg.for_testing:
+                if cfg.enabled:
                     table.add_row(cfg.provider_id, (cfg.model or "-")[:36], str(cfg.enabled))
             console.print(table)
             continue

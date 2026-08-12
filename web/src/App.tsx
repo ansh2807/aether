@@ -94,32 +94,42 @@ type Inspect = {
 
 const API = "";
 
-// The API is token-gated. `aether serve` prints a dashboard link carrying
-// ?token=…; we stash it so later reloads work without the query string.
-const TOKEN_KEY = "aether.apiToken";
-
-function readToken(): string {
-  const fromUrl = new URLSearchParams(location.search).get("token");
-  if (fromUrl) {
-    localStorage.setItem(TOKEN_KEY, fromUrl);
+// `aether serve` puts a one-time bootstrap value in the URL fragment. Fragments
+// are not sent in HTTP requests. Exchange it for an HttpOnly SameSite cookie;
+// never persist the bearer token in JavaScript-readable storage.
+function takeBootstrapToken(): string {
+  // Remove credentials left by pre-hardening dashboard releases.
+  try {
+    localStorage.removeItem("aether.apiToken");
+  } catch {
+    /* storage may be disabled; there is still nothing to persist */
+  }
+  const hash = new URLSearchParams(location.hash.replace(/^#/, "")).get("token") || "";
+  // Accept old links once, then immediately scrub the query string.
+  const legacy = new URLSearchParams(location.search).get("token") || "";
+  if (hash || legacy) {
     const url = new URL(location.href);
+    url.hash = "";
     url.searchParams.delete("token");
     history.replaceState({}, "", url.toString());
-    return fromUrl;
   }
-  return localStorage.getItem(TOKEN_KEY) || "";
+  return hash || legacy;
 }
 
-const apiToken = readToken();
+let bootstrapToken = takeBootstrapToken();
 
 function authHeaders(): Record<string, string> {
-  return apiToken ? { Authorization: `Bearer ${apiToken}` } : {};
+  return bootstrapToken ? { Authorization: `Bearer ${bootstrapToken}` } : {};
 }
 
-/** Append the token to URLs that cannot carry headers (WebSocket, EventSource). */
-function withToken(url: string): string {
-  if (!apiToken) return url;
-  return url + (url.includes("?") ? "&" : "?") + `token=${encodeURIComponent(apiToken)}`;
+async function establishDashboardSession(): Promise<void> {
+  if (!bootstrapToken) return;
+  const res = await fetch("/api/auth/session", {
+    method: "POST",
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error("Dashboard bootstrap token is invalid or expired.");
+  bootstrapToken = "";
 }
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -174,6 +184,13 @@ export default function App() {
   const [chatStreaming, setChatStreaming] = useState(false);
   const [chatUsage, setChatUsage] = useState<any>(null);
   const [chatProvider, setChatProvider] = useState<string>("");
+  const [authReady, setAuthReady] = useState(false);
+
+  useEffect(() => {
+    establishDashboardSession()
+      .catch((e: Error) => setError(e.message))
+      .finally(() => setAuthReady(true));
+  }, []);
 
   const refresh = useCallback(async () => {
     try {
@@ -211,18 +228,20 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (!authReady) return;
     refresh();
     const id = setInterval(refresh, 2500);
     return () => clearInterval(id);
-  }, [refresh]);
+  }, [refresh, authReady]);
 
   useEffect(() => {
     if (selected) loadInspect(selected);
   }, [selected, loadInspect, tasks]);
 
   useEffect(() => {
+    if (!authReady) return;
     const proto = location.protocol === "https:" ? "wss" : "ws";
-    const ws = new WebSocket(withToken(`${proto}://${location.host}/ws`));
+    const ws = new WebSocket(`${proto}://${location.host}/ws`);
     ws.onopen = () => setConnected(true);
     ws.onclose = () => setConnected(false);
     ws.onmessage = (msg) => {
@@ -247,7 +266,7 @@ export default function App() {
       clearInterval(ping);
       ws.close();
     };
-  }, [refresh, loadInspect, selected]);
+  }, [refresh, loadInspect, selected, authReady]);
 
   const activeTasks = useMemo(
     () =>

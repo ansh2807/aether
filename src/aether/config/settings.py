@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from aether.domain.enums import AdapterType, ApprovalLevel, TaskMode
@@ -30,9 +30,23 @@ class ServerSettings(BaseModel):
     # generated into data/api_token on first serve.
     require_auth: bool = True
     api_token: str = ""
+    # Set true when TLS terminates at a reverse proxy and the app itself sees
+    # an internal HTTP request. Direct HTTPS requests are detected automatically.
+    secure_cookies: bool = False
     # Built dashboard to serve at "/". Empty = auto-detect <repo>/web/dist.
     # Serving it here means no Vite dev server is needed to use the UI.
     static_dir: str = ""
+
+    @model_validator(mode="after")
+    def validate_exposure(self) -> ServerSettings:
+        if "*" in self.cors_origins:
+            raise ValueError("server.cors_origins cannot contain '*' when credentials are enabled")
+        loopback = {"127.0.0.1", "localhost", "::1"}
+        if not self.require_auth and self.host not in loopback:
+            raise ValueError("server.require_auth=false is only allowed on a loopback host")
+        if self.api_token and len(self.api_token) < 32:
+            raise ValueError("server.api_token must contain at least 32 characters")
+        return self
 
 
 class OrchestratorSettings(BaseModel):
@@ -53,7 +67,7 @@ class OrchestratorSettings(BaseModel):
     context_compaction_ratio: float = 0.78  # summarize+rollover when usage ≥ this
     prefer_llm_session_summary: bool = True
     chat_max_failovers: int = 4
-    default_chat_provider: Optional[str] = None
+    default_chat_provider: str | None = None
     # Ask a model to plan the subtask DAG. Falls back to the deterministic
     # keyword planner when no provider is available or the plan fails schema
     # validation - the orchestrator still owns execution either way.
@@ -62,9 +76,9 @@ class OrchestratorSettings(BaseModel):
 
 
 class BudgetSettings(BaseModel):
-    default_max_tokens: Optional[int] = 500_000
-    default_max_requests: Optional[int] = 200
-    default_max_cost_usd: Optional[float] = None
+    default_max_tokens: int | None = 500_000
+    default_max_requests: int | None = 200
+    default_max_cost_usd: float | None = None
     usd_per_1k_tokens: float = 0.002
 
 
@@ -87,10 +101,18 @@ class SecuritySettings(BaseModel):
     max_subprocess_output_bytes: int = 2_000_000
     workspace_only: bool = True
     # How to run verification commands over agent-written code:
-    #   subprocess - scrubbed environment, no inherited secrets (default)
-    #   container  - docker/podman, no network, resource capped
+    #   container  - docker/podman, no network, resource capped (default)
+    #   subprocess - scrubbed environment, no inherited secrets; trusted work only
     #   off        - inherit everything; only for a workspace you trust
-    verification_sandbox: str = "subprocess"
+    verification_sandbox: Literal["container", "subprocess", "off"] = "container"
+    # Production-safe default: a requested container sandbox must exist.
+    # Operators may explicitly permit the weaker scrubbed subprocess fallback
+    # for trusted workstations where Docker/Podman is unavailable.
+    verification_allow_fallback: bool = False
+    verification_image: str = Field(
+        default="aether:local",
+        min_length=1,
+    )
 
 
 class LoggingSettings(BaseModel):
@@ -113,13 +135,15 @@ class RoutingSettings(BaseModel):
     user_preferences: list[str] = Field(default_factory=list)
     # `for_testing` providers (the mock) fabricate plausible output and always
     # report success. They must never silently absorb work that a real provider
-    # failed at. Only routable when no real provider is configured, unless the
-    # operator explicitly opts in.
+    # failed at. They must be explicitly enabled (for example by `--demo`) and
+    # remain excluded from real-provider failover unless the operator opts in.
     allow_testing_fallback: bool = False
 
 
 class AetherSettings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="AETHER_", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_prefix="AETHER_", env_nested_delimiter="__", extra="ignore"
+    )
 
     data_dir: Path = Field(default_factory=lambda: Path("./data"))
     workspace_root: Path = Field(default_factory=lambda: Path("./workspace"))
@@ -133,6 +157,20 @@ class AetherSettings(BaseSettings):
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
     routing: RoutingSettings = Field(default_factory=RoutingSettings)
     providers: dict[str, ProviderConfig] = Field(default_factory=dict)
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls,
+        init_settings,
+        env_settings,
+        dotenv_settings,
+        file_secret_settings,
+    ):
+        # Explicit environment variables must override values loaded from the
+        # default/user YAML. Container deployments rely on AETHER_DATA_DIR,
+        # AETHER_WORKSPACE_ROOT and AETHER_DATABASE_URL taking precedence.
+        return env_settings, init_settings, dotenv_settings, file_secret_settings
 
     def ensure_dirs(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)
@@ -184,11 +222,11 @@ def load_yaml_config(path: Path) -> dict[str, Any]:
     with path.open("r", encoding="utf-8") as f:
         data = yaml.safe_load(f) or {}
     if not isinstance(data, dict):
-        raise ValueError(f"Config root must be a mapping: {path}")
+        raise TypeError(f"Config root must be a mapping: {path}")
     return data
 
 
-def find_config_path(explicit: Optional[str | Path] = None) -> Optional[Path]:
+def find_config_path(explicit: str | Path | None = None) -> Path | None:
     if explicit:
         p = Path(explicit).expanduser().resolve()
         if p.exists():
@@ -200,6 +238,7 @@ def find_config_path(explicit: Optional[str | Path] = None) -> Optional[Path]:
         p = Path(env).expanduser().resolve()
         if p.exists():
             return p
+        raise FileNotFoundError(f"AETHER_CONFIG points to a missing file: {p}")
 
     candidates = [
         Path.cwd() / "aether.yaml",
@@ -209,6 +248,8 @@ def find_config_path(explicit: Optional[str | Path] = None) -> Optional[Path]:
     ]
     # package-relative default shipped with repo
     here = Path(__file__).resolve()
+    packaged_default = here.parents[1] / "resources" / "aether.default.yaml"
+    candidates.append(packaged_default)
     repo_default = here.parents[3] / "config" / "aether.default.yaml"
     candidates.append(repo_default)
 
@@ -254,16 +295,17 @@ def settings_from_dict(data: dict[str, Any]) -> AetherSettings:
     return settings
 
 
-def load_settings(config_path: Optional[str | Path] = None) -> AetherSettings:
+def load_settings(config_path: str | Path | None = None) -> AetherSettings:
     path = find_config_path(config_path)
     if path is None:
         settings = AetherSettings()
-        # enable mock by default when no config found
+        # Keep the mock discoverable but disabled. Fabricated output must never
+        # make an unconfigured production install report successful work.
         settings.providers["mock"] = ProviderConfig(
             provider_id="mock",
             display_name="Mock Agent",
             adapter=AdapterType.MOCK,
-            enabled=True,
+            enabled=False,
             for_testing=True,
             capabilities={
                 "coding": 8,
