@@ -6,6 +6,23 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Hardening pass over the orchestrator, control-plane state, local API and CLI.
 
+### Added — per-agent memory across tasks
+
+- **Specialists now remember their earlier work.** `TaskMemory` is scoped to one
+  task and dies with it; this is keyed by *persona* and outlives the task, so
+  the Database Optimizer does not rediscover on Monday that migrations run
+  through `make migrate`.
+- **Bounded on purpose.** Memory is injected into every prompt that persona
+  receives, so an unbounded log would quietly eat the context window it was
+  meant to improve. Capped per agent and per note; oldest drop first.
+- **Failures are remembered alongside successes.** An agent that recalls only
+  what worked repeats its mistakes with growing confidence.
+- `aether agentic memory [slug] [--forget]` to inspect or clear it. Clearing
+  matters: memory of a repo that has since been rewritten is misleading.
+- Stored through `JsonStateStore`, so the CLI and a running server see the same
+  notes. Writing a note is best-effort and can never fail a subtask that
+  succeeded.
+
 ### Added — agentic view: a company of specialists over the model pool
 
 - **`aether agentic org | who | plan | board`.** A roster of named specialist

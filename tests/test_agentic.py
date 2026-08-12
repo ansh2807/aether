@@ -346,3 +346,128 @@ def test_no_staffing_means_no_preamble(tmp_path: Path):
     task = Task(original_prompt="x")
     sub = Subtask(task_id=task.task_id, title="t", role=AgentRole.GENERAL)
     assert orch._persona_preamble(task, sub) == ""
+
+
+# --- per-agent memory across tasks ---------------------------------------
+
+
+@pytest.fixture
+def memory(tmp_path: Path):
+    from aether.agentic.memory import AgentMemoryStore
+
+    return AgentMemoryStore(tmp_path / "agent_memory.json")
+
+
+def test_memory_outlives_the_task_that_produced_it(memory):
+    """The distinction from TaskMemory, which dies with its task."""
+    memory.remember("db", task_id="T1", subtask="Add index", outcome="completed",
+                    note="migrations run through `make migrate`, not alembic directly")
+    recalled = memory.recall("db")
+    assert len(recalled) == 1
+    assert recalled[0].task_id == "T1"
+
+    memory.remember("db", task_id="T2", subtask="Tune query", outcome="completed",
+                    note="orders table has 40M rows; avoid full scans")
+    assert len(memory.recall("db")) == 2, "a new task wiped the earlier note"
+
+
+def test_memory_is_per_agent_not_shared(memory):
+    memory.remember("db", task_id="T", subtask="s", outcome="completed", note="db thing")
+    memory.remember("sec", task_id="T", subtask="s", outcome="completed", note="sec thing")
+    assert "db thing" in memory.recall_block("db")
+    assert "db thing" not in memory.recall_block("sec")
+
+
+def test_memory_is_bounded(memory):
+    """It is injected into every prompt, so unbounded growth would quietly eat
+    the context window it was meant to improve."""
+    from aether.agentic.memory import MAX_ENTRIES_PER_AGENT
+
+    for i in range(MAX_ENTRIES_PER_AGENT + 15):
+        memory.remember("db", task_id=f"T{i}", subtask=f"s{i}", outcome="completed",
+                        note=f"note {i}")
+    entries = memory.recall("db")
+    assert len(entries) == MAX_ENTRIES_PER_AGENT
+    # the newest survive; a specialist's recent experience is the useful part
+    assert entries[-1].note == f"note {MAX_ENTRIES_PER_AGENT + 14}"
+
+
+def test_a_single_note_cannot_dominate_the_prompt(memory):
+    from aether.agentic.memory import MAX_NOTE_CHARS
+
+    memory.remember("db", task_id="T", subtask="s", outcome="completed", note="x" * 10_000)
+    assert len(memory.recall("db")[0].note) <= MAX_NOTE_CHARS
+
+
+def test_failures_are_remembered_too(memory):
+    """An agent that recalls only its successes repeats its mistakes with
+    growing confidence."""
+    memory.remember("sec", task_id="T", subtask="Audit webhooks", outcome="failed",
+                    note="missed the Stripe signature check")
+    block = memory.recall_block("sec")
+    assert "failed" in block
+    assert "signature check" in block
+    assert not memory.recall("sec")[0].succeeded
+
+
+def test_the_recall_block_is_empty_when_nothing_is_known(memory):
+    """No memory must add nothing to the prompt, not an empty heading."""
+    assert memory.recall_block("nobody") == ""
+
+
+def test_memory_can_be_forgotten(memory):
+    """Memory of a repo that has since been rewritten is actively misleading."""
+    memory.remember("db", task_id="T", subtask="s", outcome="completed", note="stale")
+    memory.remember("sec", task_id="T", subtask="s", outcome="completed", note="keep")
+
+    memory.forget("db")
+    assert memory.recall("db") == []
+    assert memory.recall("sec"), "forgetting one agent cleared another"
+
+    memory.forget()
+    assert memory.counts() == {}
+
+
+def test_memory_survives_a_new_store_over_the_same_file(tmp_path: Path):
+    """Cross-process: the CLI and a running server must see the same notes."""
+    from aether.agentic.memory import AgentMemoryStore
+
+    path = tmp_path / "m.json"
+    AgentMemoryStore(path).remember("db", task_id="T", subtask="s",
+                                    outcome="completed", note="persisted")
+    assert "persisted" in AgentMemoryStore(path).recall_block("db")
+
+
+@pytest.mark.asyncio
+async def test_a_specialist_recalls_earlier_work_on_a_later_task(tmp_path: Path, roster: Roster):
+    """The end-to-end property: a note written on task 1 reaches the model on
+    task 2. Asserting only on the store would pass against an orchestrator that
+    never read it."""
+    from aether.agentic.memory import AgentMemoryStore
+    from aether.core.orchestrator import Orchestrator
+    from aether.config.settings import AetherSettings
+    from aether.domain.models import Task
+
+    settings = AetherSettings(data_dir=tmp_path / "d", workspace_root=tmp_path / "w")
+    settings.ensure_dirs()
+
+    orch = Orchestrator.__new__(Orchestrator)
+    orch.settings = settings
+
+    AgentMemoryStore(Path(settings.data_dir) / "state" / "agent_memory.json").remember(
+        "security-appsec", task_id="EARLIER", subtask="Audit auth",
+        outcome="completed", note="this repo pins JWT expiry at 15 minutes",
+    )
+
+    task = Task(original_prompt="later task", metadata={
+        "agentic_roster": str(roster.root),
+        "agentic_staffing": {"sub-9": "security-appsec"},
+    })
+    sub = Subtask(task_id=task.task_id, subtask_id="sub-9",
+                  title="Audit the payment flow", role=AgentRole.SECURITY_REVIEWER)
+
+    text = orch._persona_preamble(task, sub)
+    assert "Application Security Engineer" in text, "persona missing"
+    assert "15 minutes" in text, (
+        "the specialist's earlier note never reached the prompt on a later task"
+    )

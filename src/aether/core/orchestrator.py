@@ -364,6 +364,45 @@ class Orchestrator:
                 if current is not None and current.status in _RESUMABLE_STATUSES:
                     await self.start_task(task_id)
 
+    def _agent_memory(self):
+        """Per-persona memory, shared with the CLI through a locked file."""
+        from aether.agentic.memory import AgentMemoryStore
+
+        store = getattr(self, "_agent_memory_store", None)
+        if store is None:
+            store = AgentMemoryStore(
+                Path(self.settings.data_dir) / "state" / "agent_memory.json"
+            )
+            self._agent_memory_store = store
+        return store
+
+    def _record_agent_memory(self, task: Task, sub: Subtask, outcome: str) -> None:
+        """Let the staffed specialist keep a note of how this went.
+
+        Best-effort by design: memory is an enhancement, and failing to write a
+        note must never fail a subtask that actually succeeded.
+        """
+        meta = task.metadata or {}
+        slug = (meta.get("agentic_staffing") or {}).get(sub.subtask_id)
+        if not slug:
+            return
+        try:
+            note = (sub.result_summary or "").strip()
+            if not note:
+                # Nothing learned worth carrying. Recording an empty note would
+                # spend one of a bounded number of slots on nothing.
+                return
+            self._agent_memory().remember(
+                slug,
+                task_id=task.task_id,
+                subtask=sub.title,
+                outcome=outcome,
+                note=note,
+                provider=sub.assigned_agent or "",
+            )
+        except Exception:  # noqa: BLE001
+            log.warning("agent_memory_write_failed", subtask=sub.subtask_id, slug=slug)
+
     def _persona_preamble(self, task: Task, sub: Subtask) -> str:
         """The staffed specialist's system prompt, if this subtask has one.
 
@@ -388,7 +427,12 @@ class Orchestrator:
             persona = cached.get(slug)
             if persona is None:
                 return ""
-            return persona_preamble(persona, sub.role)
+            preamble = persona_preamble(persona, sub.role)
+            # What this specialist learned on earlier tasks, ahead of the
+            # current assignment but after their identity — they should know
+            # who they are before recalling what they did.
+            recalled = self._agent_memory().recall_block(slug)
+            return preamble + recalled if recalled else preamble
         except Exception:  # noqa: BLE001
             log.warning("persona_load_failed", subtask=sub.subtask_id, slug=slug)
             return ""
@@ -1076,6 +1120,14 @@ class Orchestrator:
 
                 await apply(_complete)
                 await self.repo.save_memory(memory)
+                # The staffed specialist keeps its own note, outliving this task.
+                fresh = await self.tasks.get(task_id)
+                if fresh is not None:
+                    done = next(
+                        (s for s in fresh.subtasks if s.subtask_id == sub.subtask_id), None
+                    )
+                    if done is not None:
+                        self._record_agent_memory(fresh, done, "completed")
                 await self.tasks.timeline(
                     task_id, "orchestrator", "subtask_complete", f"{sub.title} via {provider_id}"
                 )

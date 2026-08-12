@@ -446,6 +446,71 @@ def agentic_plan(
     _run(_go())
 
 
+@agentic_app.command("memory")
+def agentic_memory(
+    agent: Optional[str] = typer.Argument(None, help="Persona slug, or omit for all"),
+    forget: bool = typer.Option(False, "--forget", help="Clear this agent's memory (or all)"),
+    roster_path: Optional[str] = typer.Option(None, "--roster"),
+    config: Optional[str] = typer.Option(None, "--config", "-c"),
+) -> None:
+    """What each specialist has learned across tasks.
+
+    Separate from task memory, which dies with its task. This is what the
+    Database Optimizer knows about *your repo* after working on it.
+    """
+    from aether.agentic.memory import AgentMemoryStore
+
+    roster = _roster_or_exit(roster_path)
+
+    async def _go() -> None:
+        application = await _boot(config)
+        store = AgentMemoryStore(
+            Path(application.settings.data_dir) / "state" / "agent_memory.json"
+        )
+
+        if forget:
+            target = agent or None
+            who = roster.get(agent).name if agent and roster.get(agent) else (agent or "everyone")
+            if not Confirm.ask(f"Erase remembered notes for {who}?", default=False):
+                console.print("[muted]Kept.[/]")
+                return
+            store.forget(target)
+            console.print(f"[ok]{SYM['ok']}[/] Forgotten: {who}")
+            return
+
+        if agent:
+            persona = roster.get(agent)
+            entries = store.recall(agent)
+            if not entries:
+                console.print(f"[muted]{agent} has not recorded anything yet.[/]")
+                return
+            console.print(Panel(f"[heading]{persona.name if persona else agent}[/]",
+                                border_style="accent", padding=(0, 2)))
+            table = data_table("When", "Task", "Outcome", "Model", "Note")
+            for e in entries:
+                table.add_row(e.at[:16], truncate(e.subtask, 26),
+                              "[ok]ok[/]" if e.succeeded else f"[warn]{e.outcome}[/]",
+                              e.provider or "-", f"[muted]{truncate(e.note, 52)}[/]")
+            console.print(table)
+            return
+
+        counts = store.counts()
+        if not counts:
+            console.print("[muted]Nobody has learned anything yet. Memory is written "
+                          "when a staffed subtask completes.[/]")
+            return
+        table = data_table("Agent", "Division", {"header": "Notes", "justify": "right"},
+                           title="What the company remembers")
+        for slug, n in sorted(counts.items(), key=lambda kv: -kv[1]):
+            p = roster.get(slug)
+            table.add_row(f"[value]{p.name if p else slug}[/]",
+                          f"[muted]{p.division if p else '-'}[/]", str(n))
+        console.print(table)
+        console.print("\n[muted]One agent:[/] [accent]aether agentic memory <slug>[/]")
+
+    _run(_go())
+
+
 @agentic_app.command("board")
 def agentic_board(
     task_id: str = typer.Argument(..., help="Task to show the floor for"),
