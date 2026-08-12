@@ -6,6 +6,35 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Hardening pass over the orchestrator, control-plane state, local API and CLI.
 
+### Added — agentic view: a company of specialists over the model pool
+
+- **`aether agentic org | who | plan | board`.** A roster of named specialist
+  personas is staffed onto AETHER's providers. The three layers stay
+  independent — role (what kind of work), persona (who does it), provider
+  (which model runs them) — so a specialist survives their model rate-limiting
+  and simply moves.
+- **`plan` stops for approval.** It decomposes the goal, staffs every subtask,
+  shows the reasoning per row, and runs nothing until you say yes.
+- Staffing is a **deterministic keyword match, not an LLM call**: reproducible,
+  explicable, and it still works when the planner's provider is down. It is
+  dependable about the *division* and approximate about the *individual*, which
+  is stated wherever it is shown.
+- The persona's system prompt is **prepended to the subtask prompt**, so
+  staffing changes what the model does rather than only what the table says —
+  asserted by a test that captures the real request.
+- Everything degrades to previous behaviour: no roster, a corrupt index, a
+  deleted persona file or a roster that moves between planning and execution
+  all fall back to "no persona", never to a failed task.
+- Three staffing bugs were found and fixed by looking at real output rather
+  than trusting the scores: the goal was weighted like the subtask (so every
+  subtask of a "multiplayer game" goal matched on "game", sending marketing
+  copy to a Game Audio Engineer); an unasked qualifier in a persona's name cost
+  nothing (so "Healthcare Marketing Compliance Specialist" won landing-page
+  copy on one word); and only the role could suggest a division (so marketing
+  work had no marketing home). Each has a regression test.
+- When the LLM planner is unavailable the CLI **says the plan is generic**
+  rather than letting weak staffing look like a broken matcher.
+
 ### Added — free models are findable (`aether models --free`)
 
 - **The catalogue had no notion of cost**, and OpenRouter's default model was

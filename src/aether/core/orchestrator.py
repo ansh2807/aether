@@ -364,6 +364,35 @@ class Orchestrator:
                 if current is not None and current.status in _RESUMABLE_STATUSES:
                     await self.start_task(task_id)
 
+    def _persona_preamble(self, task: Task, sub: Subtask) -> str:
+        """The staffed specialist's system prompt, if this subtask has one.
+
+        Everything here is best-effort. The roster lives outside AETHER and can
+        move or be deleted between planning and execution, and a task must not
+        fail because a persona file went missing — it simply runs the way it
+        would have with no roster at all.
+        """
+        meta = task.metadata or {}
+        slug = (meta.get("agentic_staffing") or {}).get(sub.subtask_id)
+        root = meta.get("agentic_roster")
+        if not slug or not root:
+            return ""
+        try:
+            from aether.agentic.roster import Roster
+            from aether.agentic.staffing import persona_preamble
+
+            cached = getattr(self, "_roster_cache", None)
+            if cached is None or str(cached.root) != str(root):
+                cached = Roster(Path(root))
+                self._roster_cache = cached
+            persona = cached.get(slug)
+            if persona is None:
+                return ""
+            return persona_preamble(persona, sub.role)
+        except Exception:  # noqa: BLE001
+            log.warning("persona_load_failed", subtask=sub.subtask_id, slug=slug)
+            return ""
+
     def _select_planning_adapter(self) -> Optional[AgentAdapter]:
         """Pick a provider to draft the subtask DAG.
 
@@ -734,6 +763,17 @@ class Orchestrator:
                     f"trimmed to fit {provider_id}'s {window}-token window",
                 )
             prompt = pkg.to_prompt_block() + "\n\n" + sub.description
+
+            # Agentic view: if this subtask was staffed to a named specialist,
+            # put that persona in front of the model. Without this the staffing
+            # would be decorative — a nice table and an unchanged prompt.
+            #
+            # Prepended, not appended: the persona establishes who is answering
+            # before the task describes what to do, and a truncated context
+            # should lose trailing detail rather than the identity.
+            persona_text = self._persona_preamble(task, sub)
+            if persona_text:
+                prompt = persona_text + prompt
 
             await self._msg(
                 task_id,

@@ -10,7 +10,7 @@ verification. Models are pluggable adapters — not the thing in charge.
 [![CI](https://github.com/ansh2807/aether/actions/workflows/ci.yml/badge.svg)](https://github.com/ansh2807/aether/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache--2.0-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-289-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-311-brightgreen.svg)](tests/)
 
 </div>
 
@@ -257,6 +257,52 @@ providers:
 
 AETHER **never** converts subscriptions into APIs or scrapes credentials into task memory.  
 CLI adapters use subprocess + existing machine auth only.
+
+### Agentic view — staff a company onto your models
+
+AETHER already separates the **role** a piece of work needs from the
+**provider** that runs it. A roster adds the layer between: the **persona** — a
+named specialist with real domain expertise and a system prompt that makes a
+general model behave like one.
+
+```
+role      what kind of work this is      architect · tester · reviewer
+persona   who is doing it                Application Security Engineer
+provider  which model is behind them     glm · groq · claude_cli
+```
+
+Those three are independent on purpose: when GLM rate-limits, the Security
+Engineer keeps the job and moves to another model.
+
+```bash
+aether agentic org                       # divisions and headcount
+aether agentic who "payment security"    # find the right specialist
+aether agentic plan "Build a checkout page with fraud detection"
+aether agentic board TASK-...            # who is working, on what, right now
+```
+
+`plan` decomposes the goal, staffs each subtask, and **stops for your
+approval** — with the reasoning shown per row:
+
+```text
+ #   Subtask                Role          Assigned to                    Why
+ 1   Design the schema      architect     Database Optimizer             expertise:schema, division:engineering
+ 2   Audit the payment flow security_rev  Application Security Engineer  name:security, division:security
+ 3   Write checkout tests   tester        QA Engineer                    division:testing fits tester
+```
+
+Nothing runs until you approve. Staffing is a deterministic keyword match, not
+an LLM call, so it is reproducible and explicable — but it is **dependable
+about the division and only approximate about the individual**, which is
+exactly why the plan is shown rather than acted on.
+
+> A roster is entirely optional; AETHER behaves as before without one. Point at
+> yours with `--roster <path>`, or keep it at `~/Desktop/agentic ai` with
+> `digital-wizards-roster.json` and `.claude/agents/`.
+>
+> Staffing can only be as specific as the plan it staffs. Without a real model
+> planning, the fallback emits "Plan approach / Implement / Verify", which names
+> no domain — the CLI says so rather than letting the output look broken.
 
 ### Use AETHER from tools that speak OpenAI
 

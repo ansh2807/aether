@@ -306,6 +306,196 @@ def providers_cmd(config: Optional[str] = typer.Option(None, "--config", "-c")) 
     _run(_go())
 
 
+agentic_app = typer.Typer(help="Agentic view: staff a company of specialists onto your models")
+app.add_typer(agentic_app, name="agentic")
+
+
+def _roster_or_exit(path: Optional[str] = None):
+    from aether.agentic import Roster
+
+    roster = Roster.discover(path)
+    if roster is None:
+        console.print(
+            Panel(
+                "No agent roster found.\n\n"
+                "The agentic view staffs a company of named specialists onto your\n"
+                "models. It needs a roster directory containing\n"
+                "[value]digital-wizards-roster.json[/] and [value].claude/agents/[/].\n\n"
+                "Looked in: ~/Desktop/agentic ai, ~/agentic ai, ./agentic ai\n"
+                "Point at one with [accent]--roster <path>[/].",
+                title="No roster",
+                border_style="warn",
+            )
+        )
+        raise typer.Exit(1)
+    return roster
+
+
+@agentic_app.command("org")
+def agentic_org(
+    division: Optional[str] = typer.Option(None, "--division", "-d"),
+    roster_path: Optional[str] = typer.Option(None, "--roster"),
+) -> None:
+    """The company: divisions, headcount, who is in them."""
+    from aether.agentic.view import render_org
+
+    render_org(_roster_or_exit(roster_path), division)
+
+
+@agentic_app.command("who")
+def agentic_who(
+    query: str = typer.Argument(..., help="Skill, division or name to search for"),
+    roster_path: Optional[str] = typer.Option(None, "--roster"),
+) -> None:
+    """Find the specialist for a job."""
+    roster = _roster_or_exit(roster_path)
+    hits = roster.search(query)
+    if not hits:
+        console.print(f"[muted]Nobody matches '{query}'.[/]")
+        return
+    table = data_table("Agent", "Division", "Expertise", title=f"Matches for '{query}'")
+    for p in hits:
+        table.add_row(f"[value]{p.name}[/]", f"[muted]{p.division}[/]",
+                      f"[muted]{truncate(p.description, 70)}[/]")
+    console.print(table)
+
+
+@agentic_app.command("plan")
+def agentic_plan(
+    goal: str = typer.Argument(..., help="What you want the company to do"),
+    roster_path: Optional[str] = typer.Option(None, "--roster"),
+    config: Optional[str] = typer.Option(None, "--config", "-c"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Approve and run without asking"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show the staffing and stop"),
+) -> None:
+    """Plan a goal, staff it across the company, then ask before running.
+
+    The permission gate is the point. Staffing is deterministic and only
+    approximately right about which individual takes a subtask, so the plan is
+    shown — with its reasoning — and nothing runs until you say so.
+    """
+    from aether.agentic.staffing import staff_task
+    from aether.agentic.view import render_plan
+
+    roster = _roster_or_exit(roster_path)
+
+    async def _go() -> None:
+        application = await _boot(config)
+        task = await application.orchestrator.submit(
+            goal, mode=TaskMode.SOLO, auto_start=False
+        )
+        # Plan without starting. `start_task` normally does both, but the whole
+        # point here is to see the staffing before anything runs.
+        orch = application.orchestrator
+        plan = await orch.workflow.plan_task(
+            task, orch._select_planning_adapter(), application.settings
+        )
+        if not plan.subtasks:
+            console.print("[warn]The planner produced no subtasks.[/]")
+            raise typer.Exit(1)
+        await application.tasks.update(
+            task.task_id,
+            lambda t: (
+                t.subtasks.extend(plan.subtasks),
+                t.metadata.update({"planner_source": plan.source}),
+            ),
+        )
+        task = await application.tasks.get(task.task_id)
+
+        assignments = staff_task(roster, task.subtasks, goal)
+        render_plan(assignments, goal)
+
+        # Staffing can only be as specific as the plan it is staffing. The
+        # keyword fallback emits "Plan approach / Implement / Verify", which
+        # names no domain at all — every specialist matches equally badly and
+        # the result looks like the matcher is broken when the plan is what is
+        # thin. Say so rather than let the output be quietly misread.
+        if plan.source != "llm":
+            console.print(
+                f"[warn]Planned without a model[/] [muted]({plan.source}"
+                f"{': ' + plan.reason if plan.reason else ''}). The generic subtasks "
+                f"above name no\ndomain, so staffing has little to match on. Connect a "
+                f"provider for a real plan:[/]\n  [accent]aether models --ready[/]"
+            )
+
+        if dry_run:
+            console.print(f"\n[muted]Dry run {DASH} nothing was started. Task "
+                          f"{task.task_id} is queued.[/]")
+            return
+
+        if not yes and not Confirm.ask("\nApprove this staffing and start work?", default=False):
+            console.print(f"[muted]Not started. The plan is kept as {task.task_id}; "
+                          f"re-run with --yes to approve.[/]")
+            return
+
+        # Persist the staffing so the orchestrator can put each persona in
+        # front of its subtask, and so `agentic board` can show the floor.
+        staffed = {
+            a.subtask_id: a.persona.slug for a in assignments if a.persona is not None
+        }
+        await application.tasks.update(
+            task.task_id,
+            lambda t: t.metadata.update(
+                {"agentic_roster": str(roster.root), "agentic_staffing": staffed}
+            ),
+        )
+        console.print(f"[ok]{SYM['ok']}[/] Approved. Starting {len(staffed)} staffed subtasks.")
+        await application.orchestrator.start_task(task.task_id)
+        console.print(f"[muted]Watch it:[/] [accent]aether agentic board {task.task_id}[/]")
+
+    _run(_go())
+
+
+@agentic_app.command("board")
+def agentic_board(
+    task_id: str = typer.Argument(..., help="Task to show the floor for"),
+    roster_path: Optional[str] = typer.Option(None, "--roster"),
+    config: Optional[str] = typer.Option(None, "--config", "-c"),
+) -> None:
+    """Who is working on what, right now."""
+    from aether.agentic.staffing import Assignment
+    from aether.agentic.view import render_board
+
+    roster = _roster_or_exit(roster_path)
+
+    async def _go() -> None:
+        application = await _boot(config)
+        task = await application.tasks.get(task_id)
+        if task is None:
+            console.print(f"[err]No task {task_id}[/]")
+            raise typer.Exit(1)
+
+        staffing = (task.metadata or {}).get("agentic_staffing") or {}
+        if not staffing:
+            console.print(
+                f"[muted]{task_id} was not staffed through the agentic view. "
+                f"Use[/] [accent]aether agentic plan \"...\"[/]"
+            )
+            return
+
+        assignments, statuses, providers = [], {}, {}
+        for sub in task.subtasks:
+            slug = staffing.get(sub.subtask_id)
+            assignments.append(
+                Assignment(
+                    subtask_id=sub.subtask_id,
+                    subtask_title=sub.title,
+                    role=sub.role,
+                    persona=roster.get(slug) if slug else None,
+                    score=0.0,
+                )
+            )
+            statuses[sub.subtask_id] = sub.status.value
+            providers[sub.subtask_id] = sub.assigned_agent or "-"
+
+        console.print(Panel(f"[heading]{truncate(task.normalized_goal or task.original_prompt, 90)}[/]\n"
+                            f"[muted]{task_id} {DASH} {task.status.value}[/]",
+                            border_style="accent", padding=(0, 2)))
+        render_board(roster, assignments, statuses, providers)
+
+    _run(_go())
+
+
 @app.command("models")
 def models_cmd(
     kind: Optional[str] = typer.Option(
