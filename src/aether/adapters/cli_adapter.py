@@ -118,6 +118,38 @@ class CliAgentAdapter(BaseAdapter):
             details={"path": path},
         )
 
+    def build_argv(self, path: str) -> list[str]:
+        """The command line, without running it.
+
+        Its own method so a test can assert what would be executed. Built
+        inline inside `execute` this was only reachable by spawning a real
+        process, which is why the model flag went unnoticed as missing.
+
+        Model selection: `ProviderConfig.model` already existed and this
+        adapter ignored it, so a subscription CLI could only run whatever it
+        defaults to — the one place you could not pick the newest model was
+        the login that entitles you to it.
+
+        The value passes through untouched. No allowlist of names, on purpose:
+        vendors ship faster than a hardcoded catalogue stays true, and a stale
+        list that rejects a model you are paying for is worse than no list.
+        The CLI validates it and its error surfaces normally.
+        """
+        argv = [path, *list(self.config.args or [])]
+        model = (self.config.model or "").strip()
+        flag = (self.config.extra or {}).get("model_flag", "--model")
+
+        # "claude (CLI default)" is the catalogue's way of saying *whatever you
+        # are logged into*. Passing that literal through as a model name would
+        # break every CLI provider on first use.
+        if not model or model.endswith("(CLI default)") or not flag:
+            return argv
+        # A hand-written flag in `args` was meant; a second one makes most CLIs
+        # reject the whole invocation.
+        if flag in argv:
+            return argv
+        return [*argv, flag, model]
+
     async def execute(self, request: ExecutionRequest) -> ExecutionResult:
         """Retry NETWORK/TIMEOUT failures with backoff before returning.
 
@@ -146,8 +178,7 @@ class CliAgentAdapter(BaseAdapter):
             # context already inlined by orchestrator usually
             pass
 
-        # Build argv — configurable; default: command + args, prompt on stdin
-        argv = [path, *list(self.config.args or [])]
+        argv = self.build_argv(path)
         prompt_mode = (self.config.extra or {}).get("prompt_mode", "stdin")
         if prompt_mode == "arg":
             argv.append(prompt)

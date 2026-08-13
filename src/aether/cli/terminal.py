@@ -421,13 +421,32 @@ async def run_terminal(
         if raw.startswith("/model"):
             parts = raw.split(maxsplit=1)
             if len(parts) < 2:
-                console.print("Usage: /model <provider_id>")
+                console.print("Usage: /model <provider_id>[:<model>]")
                 console.print(f"  active: {session.active_provider}")
+                console.print("  e.g.  [accent]/model claude_cli:opus-5[/]")
                 continue
             pid = parts[1].strip()
-            if not app.registry.get(pid):
+
+            # `provider:model` picks the model too. Subscription CLIs ship new
+            # models constantly and AETHER keeps no list of valid names — the
+            # string goes to the CLI, which is the only thing that actually
+            # knows. A stale allowlist here would reject models you pay for.
+            model = ""
+            if ":" in pid:
+                pid, _, model = pid.partition(":")
+                pid, model = pid.strip(), model.strip()
+
+            adapter = app.registry.get(pid)
+            if not adapter:
                 console.print(f"[red]Unknown or unloaded provider:[/] {pid}")
                 continue
+            if model:
+                cfg = getattr(adapter, "config", None)
+                if cfg is None:
+                    console.print(f"[red]{pid} does not accept a model override[/]")
+                    continue
+                cfg.model = model
+                console.print(f"[muted]{pid} model {ARROW}[/] [value]{model}[/]")
             prev = session.active_provider
             session.active_provider = pid
             if pid not in session.participating_providers:

@@ -120,6 +120,6 @@
     <text x="60" y="360" fill="#7d8590">Everything above is deterministic:</text>
     <text x="60" y="380" fill="#7d8590">planning, staffing and routing run</text>
     <text x="60" y="400" fill="#7d8590">without asking a model to decide.</text>
-    <text x="60" y="424" fill="#3fb950">440 tests · every durability claim cites one</text>
+    <text x="60" y="424" fill="#3fb950">454 tests · every durability claim cites one</text>
   </g>
 </svg>
