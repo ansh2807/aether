@@ -661,11 +661,6 @@ def _refresh_models(
         needle = search.lower()
         candidates = [p for p in candidates if needle in p.id.lower() or needle in p.name.lower()]
 
-    if not candidates:
-        console.print("[muted]No HTTP providers match. CLI providers report their own "
-                      "models — they run whatever you are logged into.[/]")
-        return
-
     configs = [
         ProviderConfig(
             provider_id=p.id, display_name=p.name,
@@ -675,8 +670,10 @@ def _refresh_models(
     ]
     by_id = {p.id: p for p in candidates}
 
-    console.print(f"[muted]Asking {len(configs)} providers what they serve now…[/]")
-    results = asyncio.run(discover_all(configs))
+    results = []
+    if configs:
+        console.print(f"[muted]Asking {len(configs)} providers what they serve now…[/]")
+        results = asyncio.run(discover_all(configs))
 
     answered = [r for r in results if r.ok and r.models]
     for res in answered:
@@ -707,9 +704,40 @@ def _refresh_models(
         for res in silent:
             console.print(f"  [muted]{res.provider_id:<22}{res.summary}[/]")
 
+    # CLI providers have no /v1/models, and skipping them silently is what let
+    # a guessed model name ("opus-5") reach the help text and get rejected by
+    # the CLI. Their own --help is the authority, so it is shown verbatim.
+    cli_specs = [p for p in selectable() if p.command and (not kind or p.kind == kind)]
+    if search:
+        needle = search.lower()
+        cli_specs = [p for p in cli_specs if needle in p.id.lower() or needle in p.name.lower()]
+    if cli_specs:
+        cli_results = asyncio.run(
+            _gather_cli(sorted({p.command for p in cli_specs}))
+        )
+        installed = [(c, r) for c, r in cli_results if r.ok]
+        if installed:
+            console.print()
+            table = data_table("CLI", "What its --model accepts",
+                               title="Signed-in CLIs (they run whatever you are logged into)")
+            for command, res in installed:
+                table.add_row(f"[value]{command}[/]", f"[muted]{truncate(res.models[0], 92)}[/]")
+            console.print(table)
+            console.print("[muted]Set one with[/] [accent]/model <provider_id>:<name>[/]")
+
     if not answered:
         console.print()
         console.print("[muted]Connect a provider first:[/] [accent]aether connect <id>[/]")
+
+
+async def _gather_cli(commands: list[str]):
+    """Ask each installed CLI in parallel; a missing binary is just a result."""
+    import asyncio as _asyncio
+
+    from aether.config.discovery import discover_cli
+
+    results = await _asyncio.gather(*(discover_cli(c) for c in commands))
+    return list(zip(commands, results))
 
 
 @app.command("models")

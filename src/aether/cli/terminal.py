@@ -423,7 +423,12 @@ async def run_terminal(
             if len(parts) < 2:
                 console.print("Usage: /model <provider_id>[:<model>]")
                 console.print(f"  active: {session.active_provider}")
-                console.print("  e.g.  [accent]/model claude_cli:opus-5[/]")
+                # Not an invented name. `claude --help` documents aliases for
+                # the latest model ('opus', 'sonnet', 'fable') alongside full
+                # names like 'claude-opus-5'. An earlier version of this line
+                # said "opus-5", which is neither, and the CLI rejected it.
+                console.print("  e.g.  [accent]/model claude_cli:opus[/]")
+                console.print("  [muted]what each CLI accepts:[/] [accent]aether models --refresh[/]")
                 continue
             pid = parts[1].strip()
 

@@ -28,6 +28,7 @@ very different things to someone deciding what to run.
 from __future__ import annotations
 
 import asyncio
+import shutil
 import os
 from dataclasses import dataclass, field
 
@@ -163,6 +164,48 @@ async def discover_all(
     finally:
         if owns_client:
             await client.aclose()
+
+
+async def discover_cli(command: str, timeout: float = 10.0) -> Discovery:
+    """Ask a CLI binary what its --model option accepts.
+
+    CLI providers have no base_url, so `discover` skips them — and that is
+    precisely where guessing hurts most, because a subscription CLI is the one
+    place someone reaches for the newest model by name. The first version of
+    this feature shipped `/model claude_cli:opus-5` as its help-text example;
+    `opus-5` is neither an alias nor a full name, and the CLI rejected it.
+
+    So nothing is inferred here. The binary's own `--help` is read and the
+    lines describing `--model` are returned verbatim. That text is written by
+    whoever ships the CLI and updates when they update it, which is the only
+    source that stays true.
+    """
+    exe = shutil.which(command)
+    if not exe:
+        return Discovery(command, error=f"{command} not installed")
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            exe, "--help",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        raw, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+    except (OSError, asyncio.TimeoutError) as exc:
+        return Discovery(command, error=f"could not run {command} --help: {type(exc).__name__}")
+
+    text = raw.decode("utf-8", errors="replace")
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        if "--model" not in line or "fallback" in line.lower():
+            continue
+        # The description usually wraps across the following indented lines.
+        block = [line.strip()]
+        for cont in lines[i + 1 : i + 6]:
+            if not cont.strip() or cont.strip().startswith("-"):
+                break
+            block.append(cont.strip())
+        return Discovery(command, models=[" ".join(block)])
+    return Discovery(command, error="no --model option documented in --help")
 
 
 def rank(models: list[str], hint: str = "") -> list[str]:
