@@ -29,7 +29,16 @@ def _redact_processor(logger: Any, method_name: str, event_dict: dict[str, Any])
 
 
 def setup_logging(level: str = "INFO", json_logs: bool = True) -> None:
-    logging.basicConfig(format="%(message)s", stream=sys.stdout, level=getattr(logging, level.upper(), logging.INFO))
+    # stderr, not stdout. Structured logs shared a stream with the chat, so a
+    # line of JSON — provider, execution_id, argv0, cwd — printed in the middle
+    # of the conversation before every reply. stdout is the program's output
+    # (the answer); stderr is where diagnostics belong. This also makes
+    # `aether ... > out.txt` capture the reply rather than the log spam.
+    logging.basicConfig(
+        format="%(message)s",
+        stream=sys.stderr,
+        level=getattr(logging, level.upper(), logging.INFO),
+    )
     processors: list[Any] = [
         structlog.contextvars.merge_contextvars,
         structlog.processors.add_log_level,

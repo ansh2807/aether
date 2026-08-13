@@ -421,14 +421,32 @@ async def run_terminal(
         if raw.startswith("/model"):
             parts = raw.split(maxsplit=1)
             if len(parts) < 2:
-                console.print("Usage: /model <provider_id>[:<model>]")
-                console.print(f"  active: {session.active_provider}")
-                # Not an invented name. `claude --help` documents aliases for
-                # the latest model ('opus', 'sonnet', 'fable') alongside full
-                # names like 'claude-opus-5'. An earlier version of this line
-                # said "opus-5", which is neither, and the CLI rejected it.
-                console.print("  e.g.  [accent]/model claude_cli:opus[/]")
-                console.print("  [muted]what each CLI accepts:[/] [accent]aether models --refresh[/]")
+                # A picker, not a usage string. Everything needed to choose is
+                # already known — which providers loaded, which is active, what
+                # model each runs — so printing "Usage:" and making someone go
+                # find the ids elsewhere was busywork.
+                ready = sorted(app.registry.list_ids())
+                table = data_table(
+                    {"header": "#", "justify": "right"}, "Provider", "Model", "",
+                    title="Pick a model",
+                )
+                for i, pid in enumerate(ready, 1):
+                    cfg = getattr(app.registry.get(pid), "config", None)
+                    model = (cfg.model if cfg else "") or "[muted]CLI default[/]"
+                    active = "[ok]← active[/]" if pid == session.active_provider else ""
+                    table.add_row(str(i), f"[value]{pid}[/]", model, active)
+                console.print(table)
+                console.print(
+                    "  [muted]switch:[/] [accent]/model <#|id>[/]   "
+                    "[muted]pick the model too:[/] [accent]/model <id>:<name>[/]"
+                )
+                # 'opus' is from `claude --help`, not invented. An earlier
+                # version of this line suggested "opus-5", which is neither an
+                # alias nor a full name, and the CLI rejected it.
+                console.print(
+                    "  [muted]e.g.[/] [accent]/model claude_cli:opus[/]   "
+                    "[muted]what each CLI accepts:[/] [accent]aether models --refresh[/]"
+                )
                 continue
             pid = parts[1].strip()
 
@@ -440,6 +458,16 @@ async def run_terminal(
             if ":" in pid:
                 pid, _, model = pid.partition(":")
                 pid, model = pid.strip(), model.strip()
+
+            # The picker numbers its rows, so accept the number back. Printing
+            # a numbered list and then refusing "2" is a small betrayal.
+            if pid.isdigit():
+                ready = sorted(app.registry.list_ids())
+                idx = int(pid)
+                if not 1 <= idx <= len(ready):
+                    console.print(f"[err]No #{idx}[/] [muted]— pick 1–{len(ready)}[/]")
+                    continue
+                pid = ready[idx - 1]
 
             adapter = app.registry.get(pid)
             if not adapter:
@@ -629,13 +657,15 @@ async def run_terminal(
 
         if final.get("ok"):
             reply = final.get("reply") or "".join(buffer)
-            # pretty panel for final (in case stream was plain)
-            if reply and len(buffer) < 3:
+            # Panel only when nothing reached the screen. The old test was
+            # `len(buffer) < 3`, meant to catch "the stream never really
+            # happened" — but a CLI provider returns its whole answer in one
+            # chunk, which *was* printed, and then got printed again inside a
+            # box. Whether anything was written is the thing to ask, so ask it.
+            if reply and not buffer:
                 console.print(
                     Panel(Markdown(reply[:6000]), title=f"[green]{provider}[/]", border_style="green")
                 )
-            else:
-                console.print(f"  [dim]{DASH} {provider} {DOT} stream complete {DASH}[/]")
             usage = final.get("usage") or {}
             if usage:
                 console.print(
@@ -646,5 +676,3 @@ async def run_terminal(
             console.print(
                 Panel(str(final.get("error") or "failed"), title="[red]failed[/]", border_style="red")
             )
-
-        console.print(render_header(app, profile, mode, session))
