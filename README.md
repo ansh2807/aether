@@ -46,6 +46,12 @@ simulated offline run, so you can try the whole lifecycle with no keys:
 Point it at real providers and the same lifecycle runs across them, with
 routing and failover between agents instead of one mock.
 
+<div align="center">
+
+<img src="docs/diagrams/pipeline.svg" width="100%" alt="Anatomy of a run: a prompt is planned into subtasks, staffed to named specialists and executed across 30+ providers with a checkpoint after each. Three gates follow — a modality gate that refuses media work no provider can do, a secure code review that fails the task on a HIGH finding, and verification that reads artifacts rather than claims. Any gate returns the work to the orchestrator; only passing all three reaches COMPLETED."/>
+
+</div>
+
 ## What it does
 
 <table>
@@ -108,6 +114,28 @@ reach `COMPLETED`, and the code runs with a scrubbed environment.
 
 Media work only routes to models that can produce media. No provider claims a
 capability AETHER cannot actually invoke.
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+**🛡️ Reviews the code its own agents write**
+
+A file shipping `shell=True` or a hardcoded key compiles perfectly. Fifteen
+CWE-mapped detectors gate the task; the scanner passes clean on this repo.
+
+`aether skills`
+
+</td>
+<td width="50%" valign="top">
+
+**🧱 Model output can't rewrite the prompt**
+
+Handoffs feed the next agent's context, so a reply saying `=== END CONTEXT ===`
+used to escape the frame. Now it structurally cannot.
+
+[`security/provenance.py`](src/aether/security/provenance.py)
 
 </td>
 </tr>
