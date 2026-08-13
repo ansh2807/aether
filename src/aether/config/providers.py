@@ -156,9 +156,14 @@ API_PROVIDERS: list[MarketProvider] = [
     MarketProvider(
         "kimi", "Kimi (Moonshot)", "api",
         "Moonshot's long-context models",
-        base_url="https://api.moonshot.cn/v1", api_key_env="KIMI_API_KEY",
-        default_model="moonshot-v1-auto", key_url="https://platform.moonshot.cn/console/api-keys",
-        context_window=128_000, capabilities=dict(CODING),
+        # .ai, not .cn: the China endpoint is unreachable from most of the
+        # world and times out rather than refusing, so it looked like Kimi was
+        # down instead of like the wrong host. Probed both — .ai answers 401
+        # (there, wants a key), .cn hangs. platform.moonshot.ai redirects to
+        # platform.kimi.ai, so the key page points straight at the target.
+        base_url="https://api.moonshot.ai/v1", api_key_env="KIMI_API_KEY",
+        default_model="kimi-k3", key_url="https://platform.kimi.ai/console/api-keys",
+        context_window=1_000_000, capabilities=dict(CODING),
         roles_preferred=("implementer", "researcher"),
     ),
     MarketProvider(
