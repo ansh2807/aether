@@ -637,6 +637,81 @@ def skills_cmd(
     console.print("only against systems you are authorised to test.[/]")
 
 
+def _refresh_models(
+    kind: Optional[str] = None, search: Optional[str] = None, free_only: bool = False
+) -> None:
+    """Ask each connected provider what it serves, and print the answer.
+
+    Deliberately does not write anything back. Discovery reports; choosing
+    stays with the operator, because silently repointing a running deployment
+    at a model found this morning would be a bad surprise.
+    """
+    import asyncio
+
+    from aether.config.discovery import discover_all, rank
+    from aether.config.providers import is_free, selectable
+    from aether.domain.models import ProviderConfig
+
+    candidates = [p for p in selectable() if p.base_url]
+    if kind:
+        candidates = [p for p in candidates if p.kind == kind]
+    if free_only:
+        candidates = [p for p in candidates if is_free(p)]
+    if search:
+        needle = search.lower()
+        candidates = [p for p in candidates if needle in p.id.lower() or needle in p.name.lower()]
+
+    if not candidates:
+        console.print("[muted]No HTTP providers match. CLI providers report their own "
+                      "models — they run whatever you are logged into.[/]")
+        return
+
+    configs = [
+        ProviderConfig(
+            provider_id=p.id, display_name=p.name,
+            base_url=p.base_url, api_key_env=p.api_key_env or "",
+        )
+        for p in candidates
+    ]
+    by_id = {p.id: p for p in candidates}
+
+    console.print(f"[muted]Asking {len(configs)} providers what they serve now…[/]")
+    results = asyncio.run(discover_all(configs))
+
+    answered = [r for r in results if r.ok and r.models]
+    for res in answered:
+        spec = by_id[res.provider_id]
+        names = rank(res.models, hint=spec.default_model)
+        table = data_table(
+            "Model", title=f"{spec.name} {DASH} {res.summary}"
+        )
+        for name in names[:40]:
+            marker = "  [ok]← configured[/]" if name == spec.default_model else ""
+            table.add_row(f"[value]{name}[/]{marker}")
+        console.print(table)
+        if len(names) > 40:
+            console.print(f"[muted]  …and {len(names) - 40} more[/]")
+        if spec.default_model not in res.models:
+            # The reason this command exists: the catalogue default has aged
+            # out and would 404 from a config file that looks authoritative.
+            console.print(
+                f"  [warn]configured default '{spec.default_model}' is not in "
+                f"this list[/] [muted]{DASH} set one above with[/] "
+                f"[accent]/model {spec.id}:<name>[/]"
+            )
+
+    silent = [r for r in results if not r.ok or not r.models]
+    if silent:
+        console.print()
+        console.print("[muted]Not asked or no answer:[/]")
+        for res in silent:
+            console.print(f"  [muted]{res.provider_id:<22}{res.summary}[/]")
+
+    if not answered:
+        console.print()
+        console.print("[muted]Connect a provider first:[/] [accent]aether connect <id>[/]")
+
+
 @app.command("models")
 def models_cmd(
     kind: Optional[str] = typer.Option(
@@ -648,6 +723,9 @@ def models_cmd(
     ),
     free_only: bool = typer.Option(
         False, "--free", help="Only providers usable without per-token charges"
+    ),
+    refresh: bool = typer.Option(
+        False, "--refresh", help="Ask each connected provider which models it serves now"
     ),
 ) -> None:
     """Every model provider AETHER can connect to, and which are ready here.
@@ -665,6 +743,10 @@ def models_cmd(
     )
 
     _load_local_secrets()
+
+    if refresh:
+        _refresh_models(kind=kind, search=search, free_only=free_only)
+        return
 
     needle = (search or "").lower()
     shown = 0
